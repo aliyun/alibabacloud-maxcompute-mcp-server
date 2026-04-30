@@ -1,0 +1,29 @@
+# Local configuration and secrets
+config.json
+*.local.json
+.env
+.env.*
+
+# Virtual environments
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Build metadata (generated, not tracked)
+.source-revision

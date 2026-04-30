@@ -1,0 +1,113 @@
+[project]
+name = "alibabacloud-maxcompute-mcp-server"
+version = "0.1.0"
+description = "MCP (Model Context Protocol) server for Alibaba Cloud MaxCompute — list projects/schemas/tables, search metadata, execute SQL, and manage instances via Catalog API and PyODPS."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Alibaba Cloud MaxCompute MCP Server Contributors" }
+]
+keywords = [
+  "maxcompute",
+  "odps",
+  "catalog",
+  "mcp",
+  "model-context-protocol",
+  "alibaba-cloud",
+  "alibabacloud",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+]
+dependencies = [
+  "pyodps_catalog>=0.3.0,<0.4",
+  "alibabacloud-tea>=0.3.0",  # Alibaba Cloud official Tea framework (not the third-party tea package)
+  "alibabacloud_tea_util>=0.3.0",
+  "alibabacloud-credentials>=1.0.0",  # Alibaba Cloud credentials SDK, supports default credential chain and ALIBABA_CLOUD_CREDENTIALS_URI (aligned with dataworks-mcp-server)
+  "maxcompute_tea_openapi",
+  "maxcompute_tea_util",
+  "pyodps>=0.12.5.1",  # MaxCompute compute engine: execute SQL, partitions, instances, etc.
+  "mcp>=1.0.0",        # Official MCP Python SDK (stdio + Streamable HTTP transport)
+  "uvicorn>=0.20.0",   # ASGI server for Streamable HTTP mode
+]
+
+[project.urls]
+Homepage = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server"
+Repository = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server"
+Documentation = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server#readme"
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=4.0"]
+# E2E credential proxy: local service uses AK to call STS AssumeRole, provides ALIBABA_CLOUD_CREDENTIALS_URI externally
+sts-proxy = ["alibabacloud-sts20150401>=1.1.0"]
+
+[project.scripts]
+alibabacloud-maxcompute-mcp-server = "maxcompute_catalog_mcp.server:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=7",
+  "pytest-cov>=4.0",
+  "anthropic>=0.40.0",
+]
+
+# Default to Alibaba Cloud PyPI mirror; set UV_DEFAULT_INDEX=https://pypi.org/simple/ to use official PyPI
+[tool.uv]
+# pyarrow>=21 only ships manylinux_2_28 wheels (requires glibc >= 2.28).
+# On glibc 2.17 systems (e.g. CentOS 7) the wheel is incompatible and source
+# build requires GCC >= 9.3.  Pin to <21 to ensure a manylinux_2_17 wheel.
+# Remove this constraint when the minimum supported platform provides glibc 2.28+.
+constraint-dependencies = ["pyarrow>=14,<21"]
+
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["maxcompute_catalog_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = [
+  "--cov=maxcompute_catalog_mcp",
+  "--cov-report=term-missing",
+  "--cov-report=html:htmlcov",
+  "--cov-report=xml:coverage.xml",
+  "--cov-config=pyproject.toml",
+]
+
+[tool.coverage.run]
+source = ["maxcompute_catalog_mcp"]
+omit = [
+  "*/tests/*",
+  "*/__main__.py",
+]
+
+[tool.coverage.report]
+# Coverage threshold (pytest exits non-zero if below this value)
+# Current actual coverage is 97%, leaving 7% buffer to avoid occasional fluctuations
+fail_under = 90
+show_missing = true
+skip_empty = true
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "if __name__ == .__main__.",
+  "raise NotImplementedError",
+  "pass",
+  "except ImportError",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
