@@ -65,7 +65,7 @@ class TestMaskAccessKeyId:
 
     def test_short(self) -> None:
         t = _make_security_tools()
-        assert t._mask_access_key_id("ABCD1234") == "ABCD1234"
+        assert t._mask_access_key_id("ABCD1234") == "AB***34"
 
     def test_empty(self) -> None:
         t = _make_security_tools()
@@ -74,7 +74,7 @@ class TestMaskAccessKeyId:
 
     def test_exactly_8(self) -> None:
         t = _make_security_tools()
-        assert t._mask_access_key_id("12345678") == "12345678"
+        assert t._mask_access_key_id("12345678") == "12***78"
 
     def test_9_chars(self) -> None:
         t = _make_security_tools()
@@ -342,3 +342,64 @@ class TestQueryGrants:
         t.maxcompute_client = None
         with pytest.raises(RuntimeError, match="Failed to create compute client"):
             t._query_grants("p1")
+
+
+# ---------------------------------------------------------------------------
+# 3. check_access error paths (unit tests, no real config needed)
+# ---------------------------------------------------------------------------
+
+class TestCheckAccessNoProjectGrantsError:
+    """check_access: include_grants=True with no project (and no default_project) must error."""
+
+    def test_check_access_no_project_no_default_grants_error(
+        self, mock_sdk: MagicMock, mock_maxcompute_client: MagicMock
+    ) -> None:
+        """When default_project is empty and project is not passed,
+        include_grants=True must return success=False with error about project."""
+        tools = Tools(
+            sdk=mock_sdk,
+            default_project="",  # no default_project
+            namespace_id="test_namespace_id",
+            maxcompute_client=mock_maxcompute_client,
+        )
+        r = tools.call("check_access", {
+            "include_grants": True,
+        })
+        payload = _text_payload(r)
+        assert payload.get("success") is False, (
+            f"check_access with include_grants=True and no project must fail, got: {payload}"
+        )
+        error_msg = (payload.get("error") or "").lower()
+        assert "project" in error_msg, (
+            f"Error message should mention 'project', got: {payload}"
+        )
+
+
+class TestCheckAccessNoComputeClient:
+    """check_access: no compute client must return descriptive error."""
+
+    def test_check_access_no_compute_client(
+        self, tools_no_compute: Tools
+    ) -> None:
+        """tools_no_compute has no maxcompute_client; check_access must fail gracefully."""
+        r = tools_no_compute.call("check_access", {
+            "project": "any_project",
+            "include_grants": False,
+        })
+        payload = _text_payload(r)
+        assert payload.get("success") is False, (
+            f"check_access without compute client must fail, got: {payload}"
+        )
+        error_msg = payload.get("error") or ""
+        message = payload.get("message") or ""
+        assert error_msg or message, "Expected non-empty error message when no compute client"
+        # _unsupported() returns error='unsupported' and message=<reason>
+        combined = f"{error_msg} {message}".lower()
+        assert (
+            "compute" in combined
+            or "maxcompute" in combined
+            or "unsupported" in combined
+        ), (
+            f"Error message should mention compute/MaxCompute or be unsupported, "
+            f"got error={error_msg!r}, message={message!r}"
+        )

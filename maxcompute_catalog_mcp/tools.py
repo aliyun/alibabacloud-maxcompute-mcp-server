@@ -209,8 +209,6 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                 return True  # don't cache transient errors — allow retry on next call
         return self._schema_enabled_cache[project]
 
-    # ---- tool specs ----
-
     def specs(self) -> list[ToolSpec]:
         project_prop = string_prop("MaxCompute project name", self.default_project if self.default_project else None)
         schema_prop = string_prop("Schema name (database name)", "default")
@@ -247,16 +245,22 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                 name="list_tables",
                 description=(
                     "List all tables under the specified Project (including internal tables, external tables, views). "
-                    "Returns JSON: success, data (containing namingModel, tables, next_page_token), summary (count overview). "
+                    "Returns JSON: success, data (containing namingModel, tables, nextPageToken), summary (count overview). "
                     "data.namingModel is '3-level' (use schema.table) or '2-level' (use table only), "
-                    "which determines the table reference format in subsequent SQL queries."
+                    "which determines the table reference format in subsequent SQL queries. "
+                    "When 'filter' is set, matching is applied client-side per page: a page may return fewer items than "
+                    "pageSize, or even 0 items, while nextPageToken is still present. "
+                    "Always use nextPageToken (not item count) to determine whether more pages exist."
                 ),
                 input_schema=input_schema(
                     {
                         "project": project_prop,
                         "schema": schema_prop,
                         "pageSize": page_size_prop,
-                        "filter": string_prop("Table name filter (optional)"),
+                        "filter": string_prop(
+                            "Table name prefix filter (optional). Applied client-side: "
+                            "pages may yield 0 items after filtering; follow nextPageToken to paginate."
+                        ),
                         "token": string_prop("Pagination token (optional)"),
                     }
                 ),

@@ -29,7 +29,7 @@ class CatalogMixin:
         token = opt_arg(args, "token")
         resp = self.sdk.client.list_projects(page_size=page_size, page_token=token)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
-        items = m.get("projects") or m.get("entries") or []
+        items = m.get("projects") or []
         summary = f"{len(items)} project(s)" if items else "0 projects"
         return mcp_ok_result(m, summary=summary)
 
@@ -51,7 +51,7 @@ class CatalogMixin:
         token = opt_arg(args, "token")
         resp = self.sdk.client.list_schemas(project_id=project, page_size=page_size, page_token=token)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
-        items = m.get("schemas") or m.get("entries") or []
+        items = m.get("schemas") or []
         summary = f"{len(items)} schema(s)" if items else "0 schemas"
         return mcp_ok_result(m, summary=summary)
 
@@ -80,11 +80,15 @@ class CatalogMixin:
             "page_size": page_size,
             "page_token": token,
         }
-        if table_filter:
-            list_kwargs["table_name_prefix"] = table_filter
         resp = self.sdk.client.list_tables(**list_kwargs)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
-        items = m.get("tables") or m.get("entries") or []
+        items = m.get("tables") or []
+        if table_filter:
+            items = [
+                t for t in items
+                if (t.get("tableName") or t.get("name", "")).startswith(table_filter)
+            ]
+            m["tables"] = items
         summary = f"{len(items)} table(s)" if items else "0 tables"
 
         schema_enabled = self._is_schema_enabled(project)

@@ -1,6 +1,7 @@
 """Additional boundary tests for tools_catalog.py."""
 from __future__ import annotations
 
+import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -95,18 +96,33 @@ def test_list_projects_plain_dict_response() -> None:
 
 
 def test_list_tables_with_filter() -> None:
-    """list_tables with filter parameter passes table_name_prefix."""
+    """list_tables with filter parameter performs client-side prefix filtering."""
     sdk = MagicMock()
     sdk.client.get_project.return_value = MagicMock(
         to_map=lambda: {"projectId": "p1", "schemaEnabled": True}
     )
     sdk.client.list_tables.return_value = MagicMock(
-        to_map=lambda: {"tables": [], "next_page_token": None}
+        to_map=lambda: {
+            "tables": [
+                {"tableName": "my_prefix_table"},
+                {"tableName": "other_table"},
+            ],
+            "next_page_token": None,
+        }
     )
     t = _make_tools(sdk=sdk)
     r = t.call("list_tables", {"project": "p1", "schema": "default", "filter": "my_prefix"})
     call_kwargs = sdk.client.list_tables.call_args.kwargs
-    assert call_kwargs.get("table_name_prefix") == "my_prefix"
+    # filter is NOT passed to SDK as table_name_prefix (client-side filtering)
+    assert "table_name_prefix" not in call_kwargs, (
+        f"table_name_prefix should not be passed to SDK; got: {call_kwargs}"
+    )
+    p = _text_payload(r)
+    d = _data(p)
+    tables = d.get("tables") or []
+    # Only the table matching the prefix should remain
+    assert len(tables) == 1, f"Expected 1 filtered table, got: {tables}"
+    assert tables[0]["tableName"] == "my_prefix_table"
 
 
 def test_get_table_schema_non_dict_response() -> None:
@@ -143,7 +159,7 @@ def test_get_table_schema_with_partition_definition() -> None:
     pd = catalog_models.PartitionDefinition()
     pc = catalog_models.PartitionedColumn()
     pc.field = "ds"
-    pd.partitioned_column = [pc]
+    pd.partitioned_columns = [pc]
     t.partition_definition = pd
 
     sdk.client.get_table.return_value = t
@@ -201,7 +217,7 @@ def test_get_table_schema_partition_keys_in_schema_dict() -> None:
     pc1.field = "ds"
     pc2 = catalog_models.PartitionedColumn()
     pc2.field = "region"
-    pd.partitioned_column = [pc1, pc2]
+    pd.partitioned_columns = [pc1, pc2]
     t.partition_definition = pd
 
     sdk.client.get_table.return_value = t
@@ -212,3 +228,33 @@ def test_get_table_schema_partition_keys_in_schema_dict() -> None:
     pkeys = d.get("partitionKeys", [])
     assert "ds" in pkeys
     assert "region" in pkeys
+
+
+def test_iter_partition_definition_columns_helper() -> None:
+    """Direct coverage for ``_iter_partition_definition_columns`` (none / missing attr / empty / normal)."""
+
+    from pyodps_catalog import models as catalog_models
+
+    from maxcompute_catalog_mcp.tools_table_meta import _iter_partition_definition_columns
+
+    assert _iter_partition_definition_columns(None) == []
+
+    missing_attr = types.SimpleNamespace()
+    assert _iter_partition_definition_columns(missing_attr) == []
+
+    pd_empty = catalog_models.PartitionDefinition()
+    assert _iter_partition_definition_columns(pd_empty) == []
+
+    pd_nonempty = catalog_models.PartitionDefinition()
+    pc_ds = catalog_models.PartitionedColumn()
+    pc_ds.field = "ds"
+    pc_region = catalog_models.PartitionedColumn()
+    pc_region.field = "region"
+    pd_nonempty.partitioned_columns = [pc_ds, pc_region]
+
+    cols = _iter_partition_definition_columns(pd_nonempty)
+    assert cols == [pc_ds, pc_region]
+    assert [getattr(c, "field", None) for c in cols] == ["ds", "region"]
+
+    pd_nonempty.partitioned_columns = []
+    assert _iter_partition_definition_columns(pd_nonempty) == []

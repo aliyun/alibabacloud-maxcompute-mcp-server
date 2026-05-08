@@ -1,6 +1,6 @@
 [project]
 name = "alibabacloud-maxcompute-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP (Model Context Protocol) server for Alibaba Cloud MaxCompute — list projects/schemas/tables, search metadata, execute SQL, and manage instances via Catalog API and PyODPS."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -26,7 +26,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Topic :: Database",
 ]
 dependencies = [
@@ -67,7 +66,17 @@ dev = [
 # On glibc 2.17 systems (e.g. CentOS 7) the wheel is incompatible and source
 # build requires GCC >= 9.3.  Pin to <21 to ensure a manylinux_2_17 wheel.
 # Remove this constraint when the minimum supported platform provides glibc 2.28+.
-constraint-dependencies = ["pyarrow>=14,<21"]
+#
+# Security floor constraints (Dependabot alerts — transitive deps not in project.dependencies):
+#   cryptography: CVE-2026-26007 (High, SECT subgroup attack) + CVE-2026-34073 (Low, DNS name constraint)
+#   requests: CVE-2026-25645 (Medium, predictable temp file in extract_zipped_paths)
+#   pygments: CVE-2026-4539 (Low, ReDoS in GUID regex)
+constraint-dependencies = [
+  "pyarrow>=14,<21",
+  "cryptography>=46.0.6",
+  "requests>=2.33.0",
+  "pygments>=2.20.0",
+]
 
 [build-system]
 requires = ["hatchling>=1.24"]
@@ -92,6 +101,7 @@ source = ["maxcompute_catalog_mcp"]
 omit = [
   "*/tests/*",
   "*/__main__.py",
+  "*/server.py",
 ]
 
 [tool.coverage.report]

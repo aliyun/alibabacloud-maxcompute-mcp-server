@@ -19,6 +19,9 @@ build/
 .coverage.*
 coverage.xml
 htmlcov/
+*.cover
+*,cover
+tests/probe_out.txt
 
 # Python cache
 __pycache__/

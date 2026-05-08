@@ -26,8 +26,10 @@ class SecurityMixin:
 
     def _mask_access_key_id(self, ak_id: str) -> str:
         """Mask AccessKeyId for privacy, showing only first 4 and last 4 characters."""
-        if not ak_id or len(ak_id) <= 8:
-            return ak_id or ""
+        if not ak_id:
+            return ""
+        if len(ak_id) <= 8:
+            return f"{ak_id[:2]}***{ak_id[-2:]}"
         return f"{ak_id[:4]}***{ak_id[-4:]}"
 
     def _enrich_creator_arn(self, odps_client: Any, project: str, name: str) -> str:

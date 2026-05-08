@@ -793,7 +793,7 @@ def test_get_table_schema_no_empty_partition_keys() -> None:
     valid = catalog_models.PartitionedColumn()
     valid.field = "ds"
     empty = catalog_models.PartitionedColumn()  # field is None → must be filtered
-    pd.partitioned_column = [valid, empty]
+    pd.partitioned_columns = [valid, empty]
 
     t = catalog_models.Table(
         project_id="p1", schema_name="default", table_name="t1",
@@ -1359,6 +1359,10 @@ def test_update_table_add_columns(meta_tools: Tools) -> None:
     assert age.mode == "NULLABLE"
     assert age.description == "years"
     assert age.sql_type_definition == "BIGINT"
+    # type_category must be set so the Catalog PUT API accepts the new field
+    assert age.type_category == "BIGINT", (
+        f"Expected type_category='BIGINT' for new BIGINT column, got {age.type_category!r}"
+    )
 
 
 def test_update_table_add_columns_rejects_duplicate(meta_tools: Tools) -> None:
@@ -1436,6 +1440,65 @@ def test_update_table_etag_override(meta_tools: Tools) -> None:
     assert sent.etag == "forced-etag"
 
 
+def test_update_table_add_and_set_comment_same_request(meta_tools: Tools) -> None:
+    """columns.add + setComments for the new column in one request must succeed.
+
+    Bug: _apply_plan used to run setComments before add, so targeting a
+    newly-added column would raise 'column path not found' even though the
+    column was present in the same request.
+    Fix: add is now executed first.
+    """
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {
+            "add": [{"name": "age", "type": "BIGINT"}],
+            "setComments": {"age": "用户年龄"},
+        },
+    })
+    payload = _text_payload(r)
+    assert payload["success"] is True, (
+        f"add+setComments for new column should succeed, got: {payload.get('error')}"
+    )
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    age = next(f for f in sent.table_schema.fields if f.field_name == "age")
+    assert age.type_category == "BIGINT"
+    assert age.description == "用户年龄"
+
+
+def test_update_table_add_and_set_nullable_same_request(meta_tools: Tools) -> None:
+    """columns.add + setNullable for the new column in one request must succeed.
+
+    New columns are NULLABLE by default, but setNullable on a just-added column
+    should not fail — add runs before setNullable.
+    """
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {
+            "add": [{"name": "score", "type": "DOUBLE"}],
+            "setNullable": ["score"],
+        },
+    })
+    payload = _text_payload(r)
+    assert payload["success"] is True, (
+        f"add+setNullable for new column should succeed, got: {payload.get('error')}"
+    )
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    score = next(f for f in sent.table_schema.fields if f.field_name == "score")
+    assert score.mode == "NULLABLE"
+
+
+def test_update_table_set_comment_unknown_column_still_errors(meta_tools: Tools) -> None:
+    """setComments for a column that truly doesn't exist must still fail."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"setComments": {"ghost": "desc"}},
+    })
+    payload = _text_payload(r)
+    assert payload["success"] is False
+    assert "ghost" in payload["error"]
+    meta_tools.sdk.client.update_table.assert_not_called()
+
+
 def test_update_table_missing_column_errors(meta_tools: Tools) -> None:
     r = meta_tools.call("update_table", {
         "project": "p1", "schema": "default", "table": "t1",
@@ -1475,6 +1538,10 @@ def test_update_table_add_column_without_description(meta_tools: Tools) -> None:
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     score = next(f for f in sent.table_schema.fields if f.field_name == "score")
     assert score.description is None
+    # type_category must also be set for DOUBLE
+    assert score.type_category == "DOUBLE", (
+        f"Expected type_category='DOUBLE' for new DOUBLE column, got {score.type_category!r}"
+    )
 
 
 # ============================================================================
@@ -1712,9 +1779,503 @@ def test_update_table_ensure_fields_fields_none(meta_tools: Tools) -> None:
     assert payload["success"] is True
 
 
-# ============================================================================
-# tools_compute.py — additional coverage
-# ============================================================================
+def test_update_table_add_columns_type_category_parametrized(meta_tools: Tools) -> None:
+    """columns.add: type_category must strip parameters/generics from the type string.
+
+    Why this test exists:
+    The Catalog PUT API rejects new columns unless typeCategory is set to the
+    base type (without precision/scale/generic parameters). Before the fix,
+    type_category was never set, causing 400 errors in production when callers
+    added DECIMAL, VARCHAR, or ARRAY columns.
+    """
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [
+            {"name": "price",  "type": "DECIMAL(10,2)"},
+            {"name": "tag",    "type": "VARCHAR(255)"},
+            {"name": "items",  "type": "ARRAY<STRING>"},
+            {"name": "kv",     "type": "MAP<STRING,BIGINT>"},
+        ]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    fields = {f.field_name: f for f in sent.table_schema.fields}
+
+    assert fields["price"].type_category == "DECIMAL", (
+        f"DECIMAL(10,2) base type should be 'DECIMAL', got {fields['price'].type_category!r}"
+    )
+    assert fields["tag"].type_category == "VARCHAR", (
+        f"VARCHAR(255) base type should be 'VARCHAR', got {fields['tag'].type_category!r}"
+    )
+    assert fields["items"].type_category == "ARRAY", (
+        f"ARRAY<STRING> base type should be 'ARRAY', got {fields['items'].type_category!r}"
+    )
+    assert fields["kv"].type_category == "MAP", (
+        f"MAP<STRING,BIGINT> base type should be 'MAP', got {fields['kv'].type_category!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for _parse_sql_type parser
+# ---------------------------------------------------------------------------
+
+class TestParseSqlType:
+    """Unit tests for the module-level _parse_sql_type() parser."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from maxcompute_catalog_mcp.tools_table_meta import _parse_sql_type
+        self.parse = _parse_sql_type
+
+    # -- simple types --
+
+    @pytest.mark.parametrize("type_str", [
+        "BIGINT", "INT", "TINYINT", "SMALLINT",
+        "FLOAT", "DOUBLE",
+        "BOOLEAN",
+        "STRING", "BINARY",
+        "DATE", "DATETIME", "TIMESTAMP", "TIMESTAMP_NTZ",
+        "JSON", "BLOB",
+        "INTERVAL_DAY_TIME", "INTERVAL_YEAR_MONTH",
+    ])
+    def test_simple_types(self, type_str):
+        f = self.parse(type_str)
+        assert f.type_category == type_str
+        assert f.fields is None or f.fields == []
+
+    def test_simple_type_case_insensitive(self):
+        """Parser must accept lowercase or mixed-case input."""
+        f = self.parse("bigint")
+        assert f.type_category == "BIGINT"
+        f2 = self.parse("String")
+        assert f2.type_category == "STRING"
+
+    def test_simple_type_whitespace_tolerant(self):
+        f = self.parse("  BIGINT  ")
+        assert f.type_category == "BIGINT"
+
+    # -- parameterised types --
+
+    def test_decimal(self):
+        f = self.parse("DECIMAL(10,2)")
+        assert f.type_category == "DECIMAL"
+        assert f.precision == "10"
+        assert f.scale == "2"
+
+    def test_decimal_whitespace(self):
+        f = self.parse("DECIMAL( 18 , 6 )")
+        assert f.type_category == "DECIMAL"
+        assert f.precision == "18"
+        assert f.scale == "6"
+
+    def test_varchar(self):
+        f = self.parse("VARCHAR(255)")
+        assert f.type_category == "VARCHAR"
+        assert f.max_length == "255"
+
+    def test_char(self):
+        f = self.parse("CHAR(10)")
+        assert f.type_category == "CHAR"
+        assert f.max_length == "10"
+
+    # -- ARRAY --
+
+    def test_array_string(self):
+        f = self.parse("ARRAY<STRING>")
+        assert f.type_category == "ARRAY"
+        assert len(f.fields) == 1
+        elem = f.fields[0]
+        assert elem.field_name == "element"
+        assert elem.type_category == "STRING"
+        assert elem.mode is None  # Catalog API: mode only on top-level fields
+
+    def test_array_decimal(self):
+        f = self.parse("ARRAY<DECIMAL(10,2)>")
+        assert f.type_category == "ARRAY"
+        elem = f.fields[0]
+        assert elem.field_name == "element"
+        assert elem.type_category == "DECIMAL"
+        assert elem.precision == "10"
+        assert elem.scale == "2"
+
+    # -- MAP --
+
+    def test_map_string_bigint(self):
+        f = self.parse("MAP<STRING,BIGINT>")
+        assert f.type_category == "MAP"
+        assert len(f.fields) == 2
+        by_name = {c.field_name: c for c in f.fields}
+        assert by_name["key"].type_category == "STRING"
+        assert by_name["value"].type_category == "BIGINT"
+
+    def test_map_key_value_modes(self):
+        f = self.parse("MAP<STRING,BIGINT>")
+        by_name = {c.field_name: c for c in f.fields}
+        # Catalog API: mode only on top-level fields; nested key/value must be None
+        assert by_name["key"].mode is None
+        assert by_name["value"].mode is None
+
+    # -- STRUCT --
+
+    def test_struct_simple(self):
+        f = self.parse("STRUCT<name:STRING,age:INT>")
+        assert f.type_category == "STRUCT"
+        assert len(f.fields) == 2
+        by_name = {c.field_name: c for c in f.fields}
+        assert by_name["name"].type_category == "STRING"
+        assert by_name["age"].type_category == "INT"
+
+    def test_struct_field_names_lowercased(self):
+        """STRUCT field names are stored lowercase (canonical form)."""
+        f = self.parse("STRUCT<MyField:STRING>")
+        assert f.fields[0].field_name == "myfield"
+
+    def test_struct_field_modes(self):
+        f = self.parse("STRUCT<a:INT,b:STRING>")
+        for sub in f.fields:
+            # Catalog API: mode only on top-level fields; nested fields must be None
+            assert sub.mode is None
+
+    # -- nested complex types --
+
+    def test_array_of_struct(self):
+        f = self.parse("ARRAY<STRUCT<a:INT,b:VARCHAR(64)>>")
+        assert f.type_category == "ARRAY"
+        elem = f.fields[0]
+        assert elem.field_name == "element"
+        assert elem.type_category == "STRUCT"
+        by_name = {c.field_name: c for c in elem.fields}
+        assert by_name["a"].type_category == "INT"
+        assert by_name["b"].type_category == "VARCHAR"
+        assert by_name["b"].max_length == "64"
+
+    def test_map_string_array(self):
+        f = self.parse("MAP<STRING,ARRAY<DECIMAL(10,2)>>")
+        assert f.type_category == "MAP"
+        by_name = {c.field_name: c for c in f.fields}
+        val = by_name["value"]
+        assert val.type_category == "ARRAY"
+        assert val.fields[0].type_category == "DECIMAL"
+        assert val.fields[0].precision == "10"
+
+    def test_struct_with_complex_children(self):
+        f = self.parse("STRUCT<tags:ARRAY<STRING>,meta:MAP<STRING,BIGINT>>")
+        assert f.type_category == "STRUCT"
+        by_name = {c.field_name: c for c in f.fields}
+        assert by_name["tags"].type_category == "ARRAY"
+        assert by_name["tags"].fields[0].type_category == "STRING"
+        assert by_name["meta"].type_category == "MAP"
+
+    def test_deeply_nested(self):
+        """ARRAY<MAP<STRING,STRUCT<x:INT>>> - 3 levels deep."""
+        f = self.parse("ARRAY<MAP<STRING,STRUCT<x:INT>>>")
+        assert f.type_category == "ARRAY"
+        map_f = f.fields[0]
+        assert map_f.type_category == "MAP"
+        by_name = {c.field_name: c for c in map_f.fields}
+        assert by_name["value"].type_category == "STRUCT"
+        assert by_name["value"].fields[0].field_name == "x"
+
+    # -- error cases --
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(ValueError, match="Unknown type"):
+            self.parse("NOSUCHTYPE")
+
+    def test_empty_string_raises(self):
+        with pytest.raises(ValueError, match="empty"):
+            self.parse("")
+
+    def test_decimal_missing_scale_raises(self):
+        with pytest.raises(ValueError, match="precision, scale"):
+            self.parse("DECIMAL(10)")
+
+    def test_decimal_empty_params_raises(self):
+        with pytest.raises(ValueError, match="precision, scale"):
+            self.parse("DECIMAL()")
+
+    def test_varchar_empty_length_raises(self):
+        with pytest.raises(ValueError, match="length"):
+            self.parse("VARCHAR()")
+
+    def test_type_with_params_and_wrong_syntax_raises(self):
+        """BIGINT(10) is invalid — BIGINT does not accept parameters."""
+        with pytest.raises(ValueError):
+            self.parse("BIGINT(10)")
+
+    def test_map_wrong_arg_count_raises(self):
+        with pytest.raises(ValueError, match="two type arguments"):
+            self.parse("MAP<STRING,BIGINT,INT>")
+
+    def test_map_single_arg_raises(self):
+        with pytest.raises(ValueError, match="two type arguments"):
+            self.parse("MAP<STRING>")
+
+    def test_struct_missing_colon_raises(self):
+        with pytest.raises(ValueError, match="name:type"):
+            self.parse("STRUCT<name STRING>")
+
+    def test_struct_empty_raises(self):
+        with pytest.raises(ValueError, match="at least one field"):
+            self.parse("STRUCT<>")
+
+    def test_unmatched_bracket_raises(self):
+        with pytest.raises(ValueError, match="Unmatched"):
+            self.parse("ARRAY<STRING")
+
+    def test_unknown_complex_base_raises(self):
+        with pytest.raises(ValueError, match="Unknown complex type"):
+            self.parse("LIST<STRING>")
+
+    # -- nesting depth guard --
+
+    def test_nesting_depth_at_exact_limit(self):
+        """Nesting at exactly _MAX_TYPE_NESTING_DEPTH complex-type layers must succeed."""
+        from maxcompute_catalog_mcp.tools_table_meta import _MAX_TYPE_NESTING_DEPTH
+        # Guard is _depth > _MAX_TYPE_NESTING_DEPTH, so depth == _MAX_TYPE_NESTING_DEPTH
+        # is still allowed.  _MAX_TYPE_NESTING_DEPTH ARRAY wrappings drive the
+        # innermost _parse_sql_type call to _depth == _MAX_TYPE_NESTING_DEPTH.
+        type_str = "ARRAY<" * _MAX_TYPE_NESTING_DEPTH + "INT" + ">" * _MAX_TYPE_NESTING_DEPTH
+        f = self.parse(type_str)
+        assert f.type_category == "ARRAY"
+
+    def test_nesting_depth_one_over_limit_raises(self):
+        """One level over _MAX_TYPE_NESTING_DEPTH must raise ValueError."""
+        from maxcompute_catalog_mcp.tools_table_meta import _MAX_TYPE_NESTING_DEPTH
+        type_str = "ARRAY<" * (_MAX_TYPE_NESTING_DEPTH + 1) + "INT" + ">" * (_MAX_TYPE_NESTING_DEPTH + 1)
+        with pytest.raises(ValueError, match="nesting depth"):
+            self.parse(type_str)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: columns.add with complex types via update_table tool
+# ---------------------------------------------------------------------------
+
+def test_update_table_add_column_decimal_sets_precision_scale(meta_tools: Tools) -> None:
+    """columns.add with DECIMAL(p,s): new field must have precision + scale set."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "price", "type": "DECIMAL(18,6)"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    price = next(f for f in sent.table_schema.fields if f.field_name == "price")
+    assert price.type_category == "DECIMAL"
+    assert price.precision == "18"
+    assert price.scale == "6"
+    assert price.mode == "NULLABLE"
+
+
+def test_update_table_add_column_varchar_sets_max_length(meta_tools: Tools) -> None:
+    """columns.add with VARCHAR(n): new field must have max_length set."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "tag", "type": "VARCHAR(255)"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    tag = next(f for f in sent.table_schema.fields if f.field_name == "tag")
+    assert tag.type_category == "VARCHAR"
+    assert tag.max_length == "255"
+
+
+def test_update_table_add_column_array_type(meta_tools: Tools) -> None:
+    """columns.add with ARRAY<STRING>: must produce one child field named 'element'."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "items", "type": "ARRAY<STRING>"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    items = next(f for f in sent.table_schema.fields if f.field_name == "items")
+    assert items.type_category == "ARRAY"
+    assert items.mode == "NULLABLE"
+    assert len(items.fields) == 1
+    elem = items.fields[0]
+    assert elem.field_name == "element"
+    assert elem.type_category == "STRING"
+
+
+def test_update_table_add_column_map_type(meta_tools: Tools) -> None:
+    """columns.add with MAP<STRING,BIGINT>: must have 'key' and 'value' child fields."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "kv", "type": "MAP<STRING,BIGINT>"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    kv = next(f for f in sent.table_schema.fields if f.field_name == "kv")
+    assert kv.type_category == "MAP"
+    by_name = {c.field_name: c for c in kv.fields}
+    assert set(by_name.keys()) == {"key", "value"}
+    assert by_name["key"].type_category == "STRING"
+    assert by_name["value"].type_category == "BIGINT"
+
+
+def test_update_table_add_column_struct_type(meta_tools: Tools) -> None:
+    """columns.add with STRUCT<...>: must produce named child fields, each with typeCategory."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "addr", "type": "STRUCT<city:STRING,zip:INT>"}]},
+    })
+    # Note: 'addr' also exists in the original mock table; check for struct-typed one
+    payload = _text_payload(r)
+    # The mock table already has 'addr' — this should fail with duplicate error
+    assert payload["success"] is False
+    assert "already exists" in payload["error"]
+    meta_tools.sdk.client.update_table.assert_not_called()
+
+
+def test_update_table_add_column_struct_type_new_name(meta_tools: Tools) -> None:
+    """columns.add with STRUCT<...>: new column, must produce named child fields."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "location", "type": "STRUCT<city:STRING,zip:INT>"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    loc = next(f for f in sent.table_schema.fields if f.field_name == "location")
+    assert loc.type_category == "STRUCT"
+    by_name = {c.field_name: c for c in loc.fields}
+    assert by_name["city"].type_category == "STRING"
+    assert by_name["zip"].type_category == "INT"
+
+
+def test_update_table_add_column_nested_array_struct(meta_tools: Tools) -> None:
+    """columns.add with ARRAY<STRUCT<...>>: nested field must be fully populated."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "records", "type": "ARRAY<STRUCT<a:INT,b:VARCHAR(64)>>"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    records = next(f for f in sent.table_schema.fields if f.field_name == "records")
+    assert records.type_category == "ARRAY"
+    elem = records.fields[0]
+    assert elem.field_name == "element"
+    assert elem.type_category == "STRUCT"
+    by_name = {c.field_name: c for c in elem.fields}
+    assert by_name["a"].type_category == "INT"
+    assert by_name["b"].type_category == "VARCHAR"
+    assert by_name["b"].max_length == "64"
+
+
+def test_update_table_add_column_invalid_type_returns_error(meta_tools: Tools) -> None:
+    """columns.add with unknown type: must return success=False, no SDK call."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "x", "type": "NOSUCHTYPE"}]},
+    })
+    payload = _text_payload(r)
+    assert payload["success"] is False
+    assert "NOSUCHTYPE" in payload["error"] or "unknown" in payload["error"].lower()
+    meta_tools.sdk.client.update_table.assert_not_called()
+
+
+def test_update_table_add_column_invalid_decimal_returns_error(meta_tools: Tools) -> None:
+    """columns.add with DECIMAL(10) — missing scale — must return error."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "x", "type": "DECIMAL(10)"}]},
+    })
+    payload = _text_payload(r)
+    assert payload["success"] is False
+    assert "DECIMAL" in payload["error"]
+    meta_tools.sdk.client.update_table.assert_not_called()
+
+
+def test_update_table_add_column_case_insensitive_type(meta_tools: Tools) -> None:
+    """columns.add: lowercase type string 'bigint' must be accepted and normalized."""
+    r = meta_tools.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "cnt", "type": "bigint"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools.sdk.client.update_table.call_args.args[0]
+    cnt = next(f for f in sent.table_schema.fields if f.field_name == "cnt")
+    assert cnt.type_category == "BIGINT"
+
+
+@pytest.fixture
+def meta_tools_pyodps_table(mock_sdk: MagicMock, mock_maxcompute_client: MagicMock) -> Tools:
+    """Tools fixture simulating a table originally created via PyODPS (not Catalog API).
+
+    PyODPS-created tables return sql_type_definition in lowercase from Catalog GET
+    (e.g. 'bigint'), while type_category is always uppercase ('BIGINT').
+    E2E-confirmed: the Catalog PUT API is case-insensitive, so these values are
+    passed through to PUT without modification.
+    """
+    from pyodps_catalog import models as catalog_models
+
+    t = catalog_models.Table(
+        project_id="p1", schema_name="default", table_name="t1",
+        etag="etag-pyodps",
+        description="created by pyodps",
+    )
+    schema = catalog_models.TableFieldSchema()
+    # Simulate PyODPS GET response: type_category uppercase, sql_type_definition lowercase
+    id_field = catalog_models.TableFieldSchema(field_name="id", type_category="BIGINT", mode="REQUIRED")
+    id_field.sql_type_definition = "bigint"  # lowercase — real PyODPS table behaviour
+    name_field = catalog_models.TableFieldSchema(field_name="name", type_category="STRING", mode="NULLABLE")
+    name_field.sql_type_definition = None    # None — another possible PyODPS behaviour
+    schema.fields = [id_field, name_field]
+    t.table_schema = schema
+
+    mock_sdk.client.get_table = MagicMock(return_value=t)
+    mock_sdk.client.update_table = MagicMock(side_effect=lambda tbl: tbl)
+    return Tools(
+        sdk=mock_sdk,
+        default_project="p1",
+        namespace_id="test_namespace_id",
+        maxcompute_client=mock_maxcompute_client,
+        credential_client=None,
+    )
+
+
+def test_update_table_pyodps_fields_pass_through(meta_tools_pyodps_table: Tools) -> None:
+    """update_table on PyODPS-created table: existing fields are passed through unchanged.
+
+    E2E-confirmed: the Catalog PUT API is case-insensitive for sqlTypeDefinition.
+    We trust the GET response and do NOT modify existing fields.
+    """
+    r = meta_tools_pyodps_table.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "description": "updated",
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools_pyodps_table.sdk.client.update_table.call_args.args[0]
+    fields = {f.field_name: f for f in sent.table_schema.fields}
+
+    # Existing fields passed through unchanged (server is case-insensitive)
+    assert fields["id"].sql_type_definition == "bigint", (
+        f"lowercase sqlTypeDefinition should be preserved as-is, got {fields['id'].sql_type_definition!r}"
+    )
+    assert fields["name"].sql_type_definition is None, (
+        f"None sqlTypeDefinition should be preserved as-is, got {fields['name'].sql_type_definition!r}"
+    )
+
+
+def test_update_table_add_column_on_pyodps_table(meta_tools_pyodps_table: Tools) -> None:
+    """columns.add on PyODPS-created table: new column must have type_category set.
+
+    The real bug: columns.add did not set type_category, causing Catalog PUT API 400.
+    Existing fields are passed through unchanged (server is case-insensitive).
+    """
+    r = meta_tools_pyodps_table.call("update_table", {
+        "project": "p1", "schema": "default", "table": "t1",
+        "columns": {"add": [{"name": "age", "type": "BIGINT", "description": "user age"}]},
+    })
+    assert _text_payload(r)["success"] is True
+    sent = meta_tools_pyodps_table.sdk.client.update_table.call_args.args[0]
+    fields = {f.field_name: f for f in sent.table_schema.fields}
+
+    # New column has both sql_type_definition and type_category
+    assert fields["age"].sql_type_definition == "BIGINT"
+    assert fields["age"].type_category == "BIGINT", (
+        f"New column must have type_category='BIGINT', got {fields['age'].type_category!r}. "
+        "Without type_category the Catalog PUT API returns 400."
+    )
+    assert fields["age"].description == "user age"
 
 
 def test_execute_sql_maxcu_exceeds_limit(tools: Tools, mock_maxcompute_client: MagicMock) -> None:

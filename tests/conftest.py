@@ -233,6 +233,55 @@ def tools_no_namespace(mock_sdk: MagicMock, mock_maxcompute_client: MagicMock):
     )
 
 
+def call_safe(tools: Any, tool_name: str, args: dict) -> dict:
+    """Call a tool, wrapping any exception into a failure MCP response dict.
+
+    Some SDK methods raise exceptions (e.g. TeaException for 404, TypeError for
+    unsupported parameters) instead of returning a structured success=false
+    response. This helper normalises both cases so tests can always use
+    _text_payload() and _assert_failure().
+    """
+    try:
+        return tools.call(tool_name, args)
+    except Exception as e:
+        return {"content": [{"type": "text", "text": json.dumps({"success": False, "error": str(e)})}]}
+
+
+def async_wait_instance(
+    real_tools: Any,
+    project: str,
+    instance_id: str,
+    *,
+    timeout: int = 120,
+    poll_interval: int = 3,
+) -> dict:
+    """Poll get_instance_status until isTerminated=True or timeout.
+
+    Returns the last status payload.
+    Raises AssertionError if the instance does not terminate within *timeout* seconds.
+    Useful in E2E tests that follow the async workflow:
+    execute_sql(async=True) → async_wait_instance() → get_instance().
+    """
+    deadline = time.time() + timeout
+    while True:
+        r = real_tools.call("get_instance_status", {
+            "project": project,
+            "instanceId": instance_id,
+        })
+        p = text_payload(r)
+        if p.get("success") is False:
+            return p
+        if p.get("isTerminated"):
+            return p
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            raise AssertionError(
+                f"Instance {instance_id!r} did not terminate within {timeout}s. "
+                f"Last status: {p}"
+            )
+        time.sleep(min(poll_interval, remaining))
+
+
 # ---- Real config / integration ----
 
 @pytest.fixture(scope="module")
