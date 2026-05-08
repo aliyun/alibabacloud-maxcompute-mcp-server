@@ -57,7 +57,7 @@ alibabacloud-maxcompute-mcp-server = "maxcompute_catalog_mcp.server:main"
 dev = [
   "pytest>=7",
   "pytest-cov>=4.0",
-  "anthropic>=0.40.0",
+  "anthropic>=0.87.0",
 ]
 
 # Default to Alibaba Cloud PyPI mirror; set UV_DEFAULT_INDEX=https://pypi.org/simple/ to use official PyPI
