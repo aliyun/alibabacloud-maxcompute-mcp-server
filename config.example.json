@@ -1,6 +1,5 @@
 {
   "maxcompute": {
-    "catalogapi_endpoint": "https://catalogapi.cn-hangzhou.maxcompute.aliyun.com",
     "accessKeyId": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
     "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
     "defaultProject": "<DEFAULT_PROJECT_NAME>",

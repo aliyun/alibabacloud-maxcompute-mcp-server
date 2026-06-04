@@ -5,12 +5,15 @@ and instance status/result retrieval.
 """
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional
 from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 try:
     from odps.errors import WaitTimeoutError as _OdpsWaitTimeoutError
@@ -62,6 +65,76 @@ def _serialize_record(record: Any, cols: List[str]) -> Dict[str, Any]:
     return row
 
 
+def _build_windows_denied_prefixes() -> tuple:
+    """Build denied prefixes from Windows environment variables.
+
+    Uses WINDIR/SystemRoot for the Windows directory and ProgramFiles/
+    ProgramFiles(x86)/ProgramData env vars so the deny list covers
+    non-C: installations.
+    """
+    prefixes: list = []
+    windir = os.environ.get("WINDIR") or os.environ.get("SystemRoot")
+    if windir:
+        prefixes.append(Path(windir))
+    for env_key in ("ProgramFiles", "ProgramFiles(x86)"):
+        val = os.environ.get(env_key)
+        if val:
+            prefixes.append(Path(val))
+    progdata = os.environ.get("ProgramData")
+    if progdata:
+        prefixes.append(Path(progdata))
+    # Fallback for environments without env vars
+    if not prefixes:
+        prefixes = [
+            Path("C:/Windows"),
+            Path("C:/Program Files"),
+            Path("C:/Program Files (x86)"),
+            Path("C:/ProgramData"),
+        ]
+    return tuple(prefixes)
+
+
+_DENIED_PREFIXES_POSIX = (
+    Path("/etc"),
+    Path("/bin"),
+    Path("/sbin"),
+    Path("/usr/bin"),
+    Path("/usr/sbin"),
+    Path("/boot"),
+    Path("/proc"),
+    Path("/sys"),
+    Path("/dev"),
+    # macOS symlinks: /etc→/private/etc
+    # Note: /tmp→/private/tmp and /var→/private/var are NOT denied because
+    # /private/var/folders is the macOS user temp dir (used by pytest etc.)
+    # and /private/tmp is a user-writable scratch space.
+    Path("/private/etc"),
+)
+
+_DENIED_PREFIXES_WINDOWS = _build_windows_denied_prefixes() if os.name == "nt" else ()
+
+_DENIED_PREFIXES = _DENIED_PREFIXES_WINDOWS if os.name == "nt" else _DENIED_PREFIXES_POSIX
+
+# Pre-computed lowercase Windows prefixes for case-insensitive comparison.
+# Must be patched alongside _DENIED_PREFIXES in tests (they are derived at import time).
+_DENIED_PREFIXES_WIN_LC = tuple(str(p).lower() for p in _DENIED_PREFIXES) if os.name == "nt" else ()
+
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_UNC_PREFIX_RE = re.compile(r"^[\\/]{2,}[^\\/]")
+
+
+def _is_denied_path(path: Path) -> bool:
+    """Return True if *path* is under a sensitive system directory."""
+    if os.name == "nt":
+        # Windows: case-insensitive comparison with backslash separators
+        path_lc = str(path).lower()
+        return any(
+            path_lc == p_lc or path_lc.startswith(p_lc + "\\")
+            for p_lc in _DENIED_PREFIXES_WIN_LC
+        )
+    return any(path.is_relative_to(p) for p in _DENIED_PREFIXES)
+
+
 def _resolve_output_uri(uri: str, *, create_dir: bool = True) -> Path:
     """Validate *uri* and return absolute Path.
 
@@ -72,33 +145,74 @@ def _resolve_output_uri(uri: str, *, create_dir: bool = True) -> Path:
 
     Only file:// and bare paths are accepted. Raises ValueError on unsupported
     schemes, empty paths, or paths targeting sensitive system directories.
+    Handles Windows drive-letter paths and file:// URIs correctly across platforms.
     """
     if not uri or not uri.strip():
         raise ValueError("output_uri must not be empty")
+    uri = uri.strip()
+
+    # Reject UNC paths early: any two+ leading slashes or backslashes before a
+    # non-separator char (catches \\server, //server, \/server, /\server, ///server, etc.)
+    if _UNC_PREFIX_RE.match(uri):
+        raise ValueError("UNC paths are not supported for output_uri")
+
     parsed = urlparse(uri)
+
     if parsed.scheme and parsed.scheme != "file":
-        raise ValueError(
-            f"Unsupported output_uri scheme {parsed.scheme!r}; only 'file://' is supported."
-        )
-    raw_path = parsed.path if parsed.scheme == "file" else uri
+        # urlparse misparses bare Windows paths like "C:/Users/out.jsonl"
+        # treating "C" as the scheme. Detect and handle this case.
+        if _WINDOWS_DRIVE_RE.match(parsed.scheme + ":/") and not parsed.netloc:
+            if os.name != "nt":
+                raise ValueError(
+                    "Windows-style paths are not supported on this platform; "
+                    "use a file:// URI or POSIX path instead."
+                )
+            raw_path = parsed.scheme + ":" + parsed.path
+        else:
+            raise ValueError(
+                f"Unsupported output_uri scheme {parsed.scheme!r}; only 'file://' is supported."
+            )
+    elif parsed.scheme == "file":
+        if parsed.netloc and parsed.netloc.lower() != "localhost":
+            raise ValueError(
+                f"file:// URI with non-local authority {parsed.netloc!r} is not supported."
+            )
+        # url2pathname converts URI path to platform-native path:
+        # - On Windows: strips leading '/' before drive letter (e.g. /C:/ → C:/)
+        # - On all platforms: decodes percent-encoded characters (e.g. %20 → space)
+        try:
+            raw_path = url2pathname(parsed.path)
+        except OSError as e:
+            raise ValueError(f"Malformed file:// URI path: {e}") from e
+        # Reject drive-letter paths decoded from file:///C:/... on POSIX
+        if os.name != "nt" and _WINDOWS_DRIVE_RE.match(raw_path.lstrip("/")):
+            raise ValueError(
+                "Windows-style file URIs are not supported on this platform; "
+                "use a POSIX path or file:// URI instead."
+            )
+    else:
+        # Bare path (POSIX or Windows with backslashes already stripped by urlparse)
+        raw_path = uri
+
     if not raw_path.strip():
         raise ValueError("output_uri path is empty")
-    path = Path(raw_path).expanduser().resolve()
 
-    # Defense-in-depth: reject paths under sensitive system directories to prevent
-    # an LLM agent from being tricked into overwriting critical system files.
-    _DENIED_PREFIXES = ("/etc", "/bin", "/sbin", "/usr/bin", "/usr/sbin",
-                        "/boot", "/proc", "/sys", "/dev")
-    path_str = str(path)
-    for prefix in _DENIED_PREFIXES:
-        if path_str == prefix or path_str.startswith(prefix + "/"):
-            raise ValueError(
-                f"output_uri resolves to a restricted system path: {path_str!r}"
-            )
+    # Post-decode UNC rejection: url2pathname may decode percent-encoded backslashes
+    # or convert file:////server/share into a UNC path after the initial URI-level check.
+    if _UNC_PREFIX_RE.match(raw_path):
+        raise ValueError("UNC paths are not supported for output_uri")
+
+    raw_abs = Path(os.path.abspath(Path(raw_path).expanduser()))
+    resolved = raw_abs.resolve()
+
+    if _is_denied_path(raw_abs) or _is_denied_path(resolved):
+        raise ValueError(
+            f"output_uri resolves to a restricted system path: {str(resolved)!r}"
+        )
 
     if create_dir:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
 def _decorate_output_path(
@@ -152,10 +266,34 @@ def _read_rows(
 
     # Streaming mode: write to .partial, atomically rename on success so the
     # final path is all-or-nothing. Errors leave no trace at output_path.
+    # O_NOFOLLOW|O_EXCL|O_CREAT prevents symlink attacks on the .partial leaf
+    # component: if an attacker places a symlink at that path after validation,
+    # O_NOFOLLOW causes ELOOP and O_EXCL prevents overwriting an existing file.
+    # Note: this protects the leaf only — parent directory components are not
+    # pinned, so a full TOCTOU defense would require dir_fd-based opening.
     tmp_path = output_path.with_suffix(output_path.suffix + ".partial")
     bytes_written = 0
     completed = False
-    fh = tmp_path.open("w", encoding="utf-8")
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(
+            str(tmp_path),
+            flags,
+            0o644,
+        )
+    except FileExistsError:
+        raise ValueError(
+            f"Partial output file already exists (possible symlink attack): {tmp_path!r}"
+        )
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise ValueError(
+                f"Partial output path is a symlink (possible attack): {tmp_path!r}"
+            )
+        raise
+    fh = os.fdopen(fd, "w", encoding="utf-8", closefd=True)
     try:
         for record in reader:
             total += 1

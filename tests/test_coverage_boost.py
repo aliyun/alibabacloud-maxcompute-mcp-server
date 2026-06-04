@@ -746,7 +746,7 @@ class TestOutputUriStreaming:
             "project": project,
             "sql": "SELECT 1 AS n, 'hello' AS s",
             "async": False,
-            "output_uri": f"file://{output_file}",
+            "output_uri": output_file.as_uri(),
             "timeout": 120,
         })
         p = _text_payload(r)
@@ -775,7 +775,7 @@ class TestOutputUriStreaming:
             "project": project,
             "sql": "SELECT 1 AS x",
             "async": False,
-            "output_uri": f"file://{output_file}",
+            "output_uri": output_file.as_uri(),
             "timeout": 120,
         })
         p = _text_payload(r)
@@ -815,7 +815,7 @@ class TestGetInstanceOutputUri:
         r2 = real_tools.call("get_instance", {
             "project": project,
             "instanceId": instance_id,
-            "output_uri": f"file://{output_file}",
+            "output_uri": output_file.as_uri(),
         })
         p2 = _text_payload(r2)
         assert "instanceId" in p2, f"get_instance response missing instanceId: {p2}"

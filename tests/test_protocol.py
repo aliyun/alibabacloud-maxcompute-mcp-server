@@ -51,6 +51,9 @@ class TestToolsSpecs:
             "create_table",
             "insert_values",
             "update_table",
+            "list_configs",
+            "get_current_config",
+            "use_config",
         ]
         for n in expected:
             assert n in names, f"missing tool: {n}"

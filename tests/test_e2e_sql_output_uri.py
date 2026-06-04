@@ -147,7 +147,7 @@ class TestExecuteSqlOutputUri:
             pytest.skip("default_project not configured")
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/result.jsonl"
+            output_uri = Path(tmpdir, "result.jsonl").as_uri()
             r = real_tools.call("execute_sql", {
                 "project": project,
                 "sql": "SELECT 1 AS n, 'hello' AS msg",
@@ -192,7 +192,7 @@ class TestExecuteSqlOutputUri:
             pytest.skip("default_project not configured")
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/preview_test.jsonl"
+            output_uri = Path(tmpdir, "preview_test.jsonl").as_uri()
             # Generate more than 20 rows to test preview truncation
             sql = (
                 "SELECT id, CONCAT('val_', CAST(id AS STRING)) AS val "
@@ -236,7 +236,7 @@ class TestAsyncOutputUriHint:
             pytest.skip("default_project not configured")
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/async_result.jsonl"
+            output_uri = Path(tmpdir, "async_result.jsonl").as_uri()
             r = real_tools.call("execute_sql", {
                 "project": project,
                 "sql": "SELECT 1 AS x",
@@ -295,7 +295,7 @@ class TestGetInstanceOutputUri:
 
         # Step 3: get_instance with output_uri
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/instance_result.jsonl"
+            output_uri = Path(tmpdir, "instance_result.jsonl").as_uri()
             r3 = real_tools.call("get_instance", {
                 "project": project,
                 "instanceId": instance_id,

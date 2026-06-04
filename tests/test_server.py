@@ -59,132 +59,101 @@ class TestParseArgs:
 # ---------------------------------------------------------------------------
 
 class TestBuildTools:
-    @patch("maxcompute_catalog_mcp.server.MaxComputeCatalogSdk")
-    @patch("maxcompute_catalog_mcp.server.MaxComputeClient")
-    @patch("maxcompute_catalog_mcp.server.get_credentials_client")
-    @patch("maxcompute_catalog_mcp.server.load_config")
-    def test_success(self, mock_load, mock_creds, mock_mc, mock_sdk) -> None:
-        mock_load.return_value = MaxComputeCatalogConfig(
+    """build_tools() now orchestrates load_configs() + build_client_set().
+
+    Detailed credential/endpoint/SDK behaviour lives in client_factory and is
+    tested in test_client_factory.py; here we test the orchestration + the two
+    sys.exit branches + that the named-config registry is handed to Tools.
+    """
+
+    def _cfg(self, **kw):
+        base = dict(
             catalogapi_endpoint="https://catalog.example.com",
             maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK",
-            access_key_secret="SK",
-            default_project="proj",
-            namespace_id="ns",
+            access_key_id="AK", access_key_secret="SK",
+            default_project="proj", namespace_id="ns",
         )
-        mock_creds.return_value = MagicMock()
-        mock_mc.create.return_value = MagicMock()
-        mock_sdk.create.return_value = MagicMock()
+        base.update(kw)
+        return MaxComputeCatalogConfig(**base)
+
+    def _client_set(self, **kw):
+        from maxcompute_catalog_mcp.client_factory import ClientSet
+        base = dict(
+            sdk=MagicMock(), maxcompute_client=MagicMock(), credential_client=MagicMock(),
+            default_project="proj", namespace_id="ns",
+        )
+        base.update(kw)
+        return ClientSet(**base)
+
+    @patch("maxcompute_catalog_mcp.server.build_client_set")
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_success(self, mock_load, mock_build) -> None:
+        mock_load.return_value = ({"default": self._cfg()}, "default")
+        mock_build.return_value = self._client_set()
 
         tools = build_tools("/fake/config.json")
         assert tools is not None
         assert tools.default_project == "proj"
         assert tools.namespace_id == "ns"
         mock_load.assert_called_once_with("/fake/config.json")
-        mock_creds.assert_called_once()
-        mock_sdk.create.assert_called_once()
+        mock_build.assert_called_once()
+        # registry handed to Tools
+        assert tools._default_name == "default"
+        assert tools._current_name == "default"
+        assert "default" in tools._configs
 
-    @patch("maxcompute_catalog_mcp.server.get_credentials_client")
-    @patch("maxcompute_catalog_mcp.server.load_config")
-    def test_credential_failure(self, mock_load, mock_creds) -> None:
-        mock_load.return_value = MaxComputeCatalogConfig(
-            catalogapi_endpoint="https://catalog.example.com",
-            maxcompute_endpoint="https://mc.example.com",
-            access_key_id="", access_key_secret="",
-        )
-        mock_creds.side_effect = ValueError("no credentials")
+    @patch("maxcompute_catalog_mcp.server.build_client_set")
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_credential_failure_exits(self, mock_load, mock_build) -> None:
+        mock_load.return_value = ({"default": self._cfg(access_key_id="", access_key_secret="")}, "default")
+        mock_build.side_effect = ValueError("no credentials")
 
         with pytest.raises(SystemExit) as exc_info:
             build_tools("/fake/config.json")
         assert "Failed to initialize credentials" in str(exc_info.value.code)
 
-    @patch("maxcompute_catalog_mcp.server.resolve_catalogapi_endpoint_with_client")
-    @patch("maxcompute_catalog_mcp.server.MaxComputeCatalogSdk")
-    @patch("maxcompute_catalog_mcp.server.MaxComputeClient")
-    @patch("maxcompute_catalog_mcp.server.get_credentials_client")
-    @patch("maxcompute_catalog_mcp.server.load_config")
-    def test_resolve_endpoint(self, mock_load, mock_creds, mock_mc, mock_sdk, mock_resolve) -> None:
-        mock_load.return_value = MaxComputeCatalogConfig(
-            catalogapi_endpoint="",  # empty → needs resolution
-            maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
-            default_project="proj",
-        )
-        mock_creds.return_value = MagicMock()
-        mc_client = MagicMock()
-        mc_client.odps_client = MagicMock()
-        mock_mc.create.return_value = mc_client
-        mock_resolve.return_value = "https://resolved-catalog.example.com"
-        mock_sdk.create.return_value = MagicMock()
+    @patch("maxcompute_catalog_mcp.server.build_client_set")
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_runtime_failure_exits(self, mock_load, mock_build) -> None:
+        """Endpoint resolution / SDK init failure (RuntimeError) → sys.exit."""
+        mock_load.return_value = ({"default": self._cfg()}, "default")
+        mock_build.side_effect = RuntimeError("resolve/sdk failed")
+
+        with pytest.raises(SystemExit) as exc_info:
+            build_tools()
+        assert "Failed to initialize config" in str(exc_info.value.code)
+        assert "resolve/sdk failed" in str(exc_info.value.code)
+
+    @patch("maxcompute_catalog_mcp.server.build_client_set")
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_builds_only_default_config(self, mock_load, mock_build) -> None:
+        """With multiple configs, build_tools builds the client set for the default only."""
+        cfg_a = self._cfg(maxcompute_endpoint="https://a.example.com", default_project="pa")
+        cfg_b = self._cfg(maxcompute_endpoint="https://b.example.com", default_project="pb")
+        mock_load.return_value = ({"a": cfg_a, "b": cfg_b}, "b")
+        mock_build.return_value = self._client_set(default_project="pb")
 
         tools = build_tools()
-        assert tools is not None
-        mock_resolve.assert_called_once()
+        # default is "b" → build_client_set called with cfg_b
+        assert mock_build.call_args.args[0] is cfg_b
+        assert tools._default_name == "b" and tools._current_name == "b"
+        assert set(tools._configs) == {"a", "b"}
 
-    @patch("maxcompute_catalog_mcp.server.resolve_catalogapi_endpoint_with_client")
-    @patch("maxcompute_catalog_mcp.server.MaxComputeClient")
-    @patch("maxcompute_catalog_mcp.server.get_credentials_client")
-    @patch("maxcompute_catalog_mcp.server.load_config")
-    def test_resolve_endpoint_failure(self, mock_load, mock_creds, mock_mc, mock_resolve) -> None:
-        mock_load.return_value = MaxComputeCatalogConfig(
-            catalogapi_endpoint="",
-            maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
-            default_project="proj",
-        )
-        mock_creds.return_value = MagicMock()
-        mc_client = MagicMock()
-        mc_client.odps_client = MagicMock()
-        mock_mc.create.return_value = mc_client
-        # resolve_catalogapi_endpoint_with_client raises ValueError in practice
-        mock_resolve.side_effect = ValueError("resolve failed")
-
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_invalid_config_exits(self, mock_load) -> None:
+        mock_load.side_effect = ValueError("default config 'x' not found")
         with pytest.raises(SystemExit) as exc_info:
             build_tools()
-        # server.py exits with a message containing the failure context
-        assert "catalogapi_endpoint" in str(exc_info.value.code).lower() or \
-               "resolve" in str(exc_info.value.code).lower()
+        assert "Invalid MaxCompute config" in str(exc_info.value.code)
 
-    @patch("maxcompute_catalog_mcp.server.MaxComputeCatalogSdk")
-    @patch("maxcompute_catalog_mcp.server.MaxComputeClient")
-    @patch("maxcompute_catalog_mcp.server.get_credentials_client")
-    @patch("maxcompute_catalog_mcp.server.load_config")
-    def test_sdk_creation_failure(self, mock_load, mock_creds, mock_mc, mock_sdk) -> None:
-        mock_load.return_value = MaxComputeCatalogConfig(
-            catalogapi_endpoint="https://catalog.example.com",
-            maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
-        )
-        mock_creds.return_value = MagicMock()
-        mock_mc.create.return_value = MagicMock()
-        mock_sdk.create.side_effect = RuntimeError("SDK init failed")
-
+    @patch("maxcompute_catalog_mcp.server.build_client_set")
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_unexpected_error_exits(self, mock_load, mock_build) -> None:
+        mock_load.return_value = ({"default": self._cfg()}, "default")
+        mock_build.side_effect = ConnectionError("network down")
         with pytest.raises(SystemExit) as exc_info:
             build_tools()
-        assert "SDK init failed" in str(exc_info.value.code) or \
-               "sdk" in str(exc_info.value.code).lower()
-
-    @patch("maxcompute_catalog_mcp.server.MaxComputeCatalogSdk")
-    @patch("maxcompute_catalog_mcp.server.MaxComputeClient")
-    @patch("maxcompute_catalog_mcp.server.get_credentials_client")
-    @patch("maxcompute_catalog_mcp.server.load_config")
-    def test_no_mc_client_no_endpoint_exits(
-        self, mock_load, mock_creds, mock_mc, mock_sdk,
-    ) -> None:
-        """No MaxCompute client and empty catalogapi_endpoint → sys.exit before SDK creation."""
-        mock_load.return_value = MaxComputeCatalogConfig(
-            catalogapi_endpoint="",
-            maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
-        )
-        mock_creds.return_value = MagicMock()
-        mock_mc.create.return_value = None  # no compute client
-
-        with pytest.raises(SystemExit) as exc_info:
-            build_tools()
-        # Ensure SDK.create was NOT called (we exited earlier)
-        mock_sdk.create.assert_not_called()
-        assert "catalogapi_endpoint" in str(exc_info.value.code).lower()
+        assert "ConnectionError" in str(exc_info.value.code)
 
 
 # ---------------------------------------------------------------------------

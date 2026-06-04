@@ -1,5 +1,7 @@
 # Local configuration and secrets
 config.json
+config.multi.json
+config.multiconfig.json
 *.local.json
 .env
 .env.*
@@ -18,6 +20,7 @@ build/
 .coverage
 .coverage.*
 coverage.xml
+coverage_*.xml
 htmlcov/
 *.cover
 *,cover

@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from odps import ODPS
 
+from .client_factory import ClientSet, build_client_set
 from .maxcompute_client import MaxComputeCatalogSdk, MaxComputeClient, _FULL_USER_AGENT
 from .mcp_protocol import JsonRpcError
 from .tools_catalog import CatalogMixin
@@ -24,6 +25,7 @@ from .tools_common import ToolSpec, input_schema, int_prop, string_prop
 from .tools_compute import ComputeMixin
 from .tools_designer import DesignerMixin
 from .tools_security import SecurityMixin
+from .tools_session import SessionMixin
 from .tools_table_meta import TableMetaMixin
 
 # NOTE: _FULL_USER_AGENT is explicitly set on ODPS clients. The pyodps SDK appends
@@ -39,7 +41,7 @@ class CredentialClient(Protocol):
     def get_credential(self) -> Any: ...
 
 
-class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaMixin):
+class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaMixin, SessionMixin):
     """MCP tools implementation.
 
     - MCP payload: {content:[{type:"text", text:"<json>"}]}; JSON convention for model extraction:
@@ -58,6 +60,9 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
         namespace_id: str = "",
         maxcompute_client: Optional[MaxComputeClient] = None,
         credential_client: Optional[CredentialClient] = None,
+        configs: Optional[Dict[str, Any]] = None,
+        default_name: str = "",
+        client_set_builder: Optional[Any] = None,
     ):
         self.sdk = sdk
         self.default_project = default_project or ""
@@ -76,6 +81,28 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
         # Enable ODPS2 type extensions (DATE, etc.) once at init, not per-request
         from odps import options as odps_options
         odps_options.sql.use_odps2_extension = True
+
+        # ---- named-config registry (multi-region / multi-identity switching) ----
+        # configs: {name -> MaxComputeCatalogConfig}; the passed sdk/maxcompute_client/...
+        # correspond to default_name and are seeded into the client-set cache.
+        self._configs: Dict[str, Any] = dict(configs or {})
+        self._default_name = default_name or (next(iter(self._configs)) if self._configs else "")
+        self._current_name = self._default_name
+        # Builder is injectable for tests; defaults to the real client_factory.
+        self._client_set_builder = client_set_builder or build_client_set
+        # Guards the active-config swap (switch-vs-switch atomicity). Does NOT
+        # provide per-session isolation — the active config is process-global
+        # (see use_config docs / _activate_config note).
+        self._config_switch_lock = RLock()
+        self._client_set_cache: Dict[str, ClientSet] = {}
+        if self._current_name:
+            self._client_set_cache[self._current_name] = ClientSet(
+                sdk=sdk,
+                maxcompute_client=maxcompute_client,
+                credential_client=credential_client,
+                default_project=self.default_project,
+                namespace_id=self.namespace_id,
+            )
 
     # ---- credential / client management ----
 
@@ -186,6 +213,38 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                 f"Cannot create compute client for project '{project}'. "
                 f"Check credentials and endpoint configuration. Original error: {e}"
             ) from e
+
+    # ---- named-config switching ----
+
+    def _activate_config(self, name: str) -> None:
+        """Switch active clients to the named config (build + cache lazily).
+
+        Builds the config's ClientSet on first use, swaps the active
+        sdk / maxcompute_client / credential_client / default_project / namespace_id,
+        and resets per-project caches (they are tied to the previous identity and
+        endpoint). Raises on build/connect failure; caller keeps the current config.
+        """
+        cs = self._client_set_cache.get(name)
+        if cs is None:
+            # Build (incl. network I/O) OUTSIDE the switch lock; on failure we
+            # never mutate active state, so the current config stays intact.
+            cs = self._client_set_builder(self._configs[name])
+        # Swap active clients atomically w.r.t. other switches. NOTE: this guards
+        # switch-vs-switch only; it does NOT provide per-session isolation — the
+        # active config is process-global (intended for single-client / stdio
+        # use; in shared stateless HTTP mode all clients share it, see use_config).
+        with self._config_switch_lock:
+            self._client_set_cache[name] = cs
+            self.sdk = cs.sdk
+            self.maxcompute_client = cs.maxcompute_client
+            self._credential_client = cs.credential_client
+            self.default_project = cs.default_project or ""
+            self.namespace_id = cs.namespace_id or ""
+            self._current_name = name
+            # Reset caches bound to the previous identity/endpoint.
+            self._schema_enabled_cache = {}
+            with self._compute_client_cache_lock:
+                self._compute_client_cache.clear()
 
     # ---- 2-level / 3-level project detection via get_project ----
 
@@ -665,6 +724,44 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             ),
         ]
 
+        # session — switch between named runtime configs (region / identity)
+        session_tools = [
+            ToolSpec(
+                name="list_configs",
+                description=(
+                    "List all named runtime configs (each bundles an endpoint + identity + project). "
+                    "Returns each config's name, region, description, maxcompute_endpoint, default_project, "
+                    "and which is default / current. NEVER returns AccessKey id/secret. "
+                    "Use this to discover switchable regions/identities, then call use_config to switch."
+                ),
+                input_schema=input_schema({}),
+            ),
+            ToolSpec(
+                name="get_current_config",
+                description=(
+                    "Get the currently active named config "
+                    "(name / region / description / maxcompute_endpoint / default_project). "
+                    "NEVER returns AccessKey id/secret."
+                ),
+                input_schema=input_schema({}),
+            ),
+            ToolSpec(
+                name="use_config",
+                description=(
+                    "Switch the active named config by name; all subsequent tools use that config's "
+                    "endpoint + identity + default project. Returns an error and keeps the current config "
+                    "unchanged if the name is unknown or the connection fails. NEVER returns AccessKey id/secret. "
+                    "NOTE: the active config is process-global — intended for single-client (stdio) use. "
+                    "In shared stateless HTTP mode, all connected clients share the same active config, so a "
+                    "switch by one client affects the others; do not rely on per-client isolation there."
+                ),
+                input_schema=input_schema(
+                    {"name": string_prop("Config name to switch to (see list_configs)")},
+                    required=["name"],
+                ),
+            ),
+        ]
+
         # resource_mgr (ops) tools not implemented
         return (
             explorer
@@ -673,6 +770,7 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             + security_tools
             + table_designer
             + table_meta
+            + session_tools
         )
 
     # ---- tool call dispatcher ----
@@ -695,6 +793,9 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             "create_table": self.create_table,
             "insert_values": self.insert_values,
             "update_table": self.update_table,
+            "list_configs": self.list_configs,
+            "get_current_config": self.get_current_config,
+            "use_config": self.use_config,
         }
         fn = handlers.get(name)
         if fn is None:

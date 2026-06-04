@@ -5,16 +5,10 @@ import asyncio
 import logging
 import os
 import sys
-from dataclasses import replace
 from typing import Optional
 
-from .config import (
-    load_config,
-    resolve_catalogapi_endpoint_with_client,
-    resolve_protocol_and_endpoints,
-)
-from .credentials import get_credentials_client
-from .maxcompute_client import MaxComputeCatalogSdk, MaxComputeClient
+from .client_factory import build_client_set
+from .config import load_configs
 from .mcp_protocol import JsonRpcError
 from .tools import Tools
 
@@ -47,30 +41,24 @@ def _parse_args() -> tuple[Optional[str], str, str, int]:
 
 
 def build_tools(config_path: Optional[str] = None) -> Tools:
-    """Build and return a Tools instance.
+    """Build a Tools instance from one-or-many named configs.
 
-    Initialization order:
-    1. Load config (catalogapi_endpoint may be empty)
-    2. Create credentials client
-    3. Create ODPS client (for SQL execution)
-    4. Resolve catalogapi_endpoint via ODPS client if not configured
-    5. Create Catalog SDK client
+    Loads all named configs (load_configs), builds the client set for the
+    default config so the server is immediately usable, and hands the full
+    registry to Tools so the user can switch configs at runtime via use_config.
+    Backward compatible: a legacy single config surfaces as one config "default".
     """
-    cfg = load_config(config_path)
-
-    # Create a unified Credentials Client singleton shared by all components,
-    # supporting automatic credential refresh.
-    # Priority: static AK/SK from config.json > default credential chain
-    # (environment variables / credentials_uri / ECS RAM Role / etc.)
     try:
-        credential_client = get_credentials_client(
-            access_key_id=cfg.access_key_id,
-            access_key_secret=cfg.access_key_secret,
-            security_token=cfg.security_token,
-        )
+        configs, default_name = load_configs(config_path)
     except ValueError as e:
+        sys.exit(f"Invalid MaxCompute config: {e}")
+
+    try:
+        cs = build_client_set(configs[default_name])
+    except ValueError as e:
+        # credential failure (get_credentials_client)
         sys.exit(
-            f"Failed to initialize credentials: {e}\n"
+            f"Failed to initialize credentials for config {default_name!r}: {e}\n"
             "Hint: provide credentials via one of the following methods:\n"
             "  1. Set access_key_id / access_key_secret in config.json\n"
             "  2. Set ALIBABA_CLOUD_ACCESS_KEY_ID and ALIBABA_CLOUD_ACCESS_KEY_SECRET env vars\n"
@@ -78,50 +66,20 @@ def build_tools(config_path: Optional[str] = None) -> Tools:
             "  4. Run on an ECS instance with a RAM role attached\n"
             "Ensure 'alibabacloud-credentials' is installed: pip install alibabacloud-credentials"
         )
-
-    # create ODPS client first; reused below to resolve catalogapi_endpoint if needed
-    resolved = resolve_protocol_and_endpoints(cfg)
-    maxcompute_client = MaxComputeClient.create(
-        cfg, credential_client=credential_client, resolved=resolved,
-    )
-
-    # use configured catalogapi_endpoint if set; otherwise resolve via ODPS client
-    catalogapi_endpoint = cfg.catalogapi_endpoint
-    if not catalogapi_endpoint:
-        if maxcompute_client is None:
-            sys.exit(
-                "Failed to create MaxCompute client. "
-                "Cannot resolve catalogapi_endpoint without a valid ODPS client. "
-                "Please ensure default_project and maxcompute_endpoint are configured, "
-                "or explicitly set MAXCOMPUTE_CATALOG_API_ENDPOINT."
-            )
-        try:
-            catalogapi_endpoint = resolve_catalogapi_endpoint_with_client(
-                maxcompute_client.odps_client,
-                resolved.maxcompute_url,
-            )
-        except Exception as e:
-            sys.exit(f"Failed to resolve catalogapi endpoint: {e}")
-
-    # update config with resolved endpoint, then re-resolve so catalogapi_protocol/host
-    # reflect any scheme embedded in the probed value.
-    cfg = replace(cfg, catalogapi_endpoint=catalogapi_endpoint)
-    resolved = resolve_protocol_and_endpoints(cfg)
-
-    # create Catalog SDK client
-    try:
-        sdk = MaxComputeCatalogSdk.create(
-            cfg, credential_client=credential_client, resolved=resolved,
-        )
     except RuntimeError as e:
-        sys.exit(f"Failed to initialize MaxCompute Catalog SDK: {e}")
+        # endpoint resolution / Catalog SDK initialization failure
+        sys.exit(f"Failed to initialize config {default_name!r}: {e}")
+    except Exception as e:  # network/import/other — fail with a clear message, not a raw traceback
+        sys.exit(f"Failed to initialize config {default_name!r}: {type(e).__name__}: {e}")
 
     return Tools(
-        sdk=sdk,
-        default_project=cfg.default_project,
-        namespace_id=cfg.namespace_id,
-        maxcompute_client=maxcompute_client,
-        credential_client=credential_client,
+        sdk=cs.sdk,
+        default_project=cs.default_project,
+        namespace_id=cs.namespace_id,
+        maxcompute_client=cs.maxcompute_client,
+        credential_client=cs.credential_client,
+        configs=configs,
+        default_name=default_name,
     )
 
 

@@ -204,7 +204,7 @@ class TestSyncOutputUriStreaming:
             pytest.skip("default_project not configured")
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/stream_result.jsonl"
+            output_uri = Path(tmpdir, "stream_result.jsonl").as_uri()
             r = real_tools.call("execute_sql", {
                 "project": project,
                 "sql": "SELECT 42 AS answer, 'hello' AS msg",
@@ -242,7 +242,7 @@ class TestSyncOutputUriStreaming:
             pytest.skip("default_project not configured")
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/preview_result.jsonl"
+            output_uri = Path(tmpdir, "preview_result.jsonl").as_uri()
             r = real_tools.call("execute_sql", {
                 "project": project,
                 "sql": "SELECT 1 AS n",
@@ -267,7 +267,7 @@ class TestSyncOutputUriStreaming:
             pytest.skip("default_project not configured")
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/hints_result.jsonl"
+            output_uri = Path(tmpdir, "hints_result.jsonl").as_uri()
             r = real_tools.call("execute_sql", {
                 "project": project,
                 "sql": "SELECT 1 AS n",
@@ -313,7 +313,7 @@ class TestGetInstanceOutputUriStreaming:
 
         # get_instance with output_uri
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
-            output_uri = f"file://{tmpdir}/async_result.jsonl"
+            output_uri = Path(tmpdir, "async_result.jsonl").as_uri()
             r3 = real_tools.call("get_instance", {
                 "project": project,
                 "instanceId": instance_id,

@@ -11,6 +11,7 @@ from maxcompute_catalog_mcp.config import (
     MaxComputeCatalogConfig,
     ResolvedEndpoints,
     load_config,
+    load_configs,
     resolve_catalogapi_endpoint_with_client,
     resolve_protocol_and_endpoints,
     split_scheme,
@@ -410,3 +411,90 @@ def test_resolve_endpoint_content_decode_fallback() -> None:
     client.rest.get.return_value = resp
     result = resolve_catalogapi_endpoint_with_client(client, "https://mc.example.com")
     assert result == "https://catalog-fallback.example.com"
+
+
+# ---------------------------------------------------------------------------
+# load_configs() — named configs + backward compatibility
+# ---------------------------------------------------------------------------
+
+
+class TestLoadConfigs:
+    def test_multi_named_configs(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({
+            "default": "hz",
+            "configs": {
+                "hz": {
+                    "region": "cn-hangzhou", "description": "HZ",
+                    "maxcompute_endpoint": "https://hz.example.com",
+                    "accessKeyId": "AK1", "accessKeySecret": "SK1", "defaultProject": "p1",
+                },
+                "sg": {
+                    "maxcompute_endpoint": "https://sg.example.com",
+                    "accessKeyId": "AK2", "accessKeySecret": "SK2",
+                },
+            },
+        }))
+        configs, default_name = load_configs(str(p))
+        assert default_name == "hz"
+        assert set(configs) == {"hz", "sg"}
+        assert configs["hz"].maxcompute_endpoint == "https://hz.example.com"
+        assert configs["hz"].region == "cn-hangzhou"
+        assert configs["hz"].description == "HZ"
+        assert configs["hz"].default_project == "p1"
+        assert configs["sg"].access_key_id == "AK2"
+        assert configs["sg"].region == ""  # optional, defaults empty
+
+    def test_default_falls_back_to_first_key(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({
+            "configs": {
+                "a": {"maxcompute_endpoint": "https://a.example.com"},
+                "b": {"maxcompute_endpoint": "https://b.example.com"},
+            },
+        }))
+        _, default_name = load_configs(str(p))
+        assert default_name == "a"
+
+    def test_default_not_in_configs_raises(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({
+            "default": "nope",
+            "configs": {"a": {"maxcompute_endpoint": "https://a.example.com"}},
+        }))
+        with pytest.raises(ValueError, match="default config"):
+            load_configs(str(p))
+
+    def test_bundle_missing_endpoint_raises(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({"configs": {"a": {"accessKeyId": "AK"}}}))
+        with pytest.raises(ValueError, match="invalid named config 'a'"):
+            load_configs(str(p))
+
+    def test_bundle_invalid_protocol_raises(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({
+            "configs": {"a": {"maxcompute_endpoint": "https://a", "protocol": "ftp"}},
+        }))
+        with pytest.raises(ValueError, match="invalid named config 'a'"):
+            load_configs(str(p))
+
+    def test_backward_compat_single_maxcompute(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MAXCOMPUTE_PROTOCOL", raising=False)
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({
+            "maxcompute": {
+                "maxcompute_endpoint": "https://mc.example.com",
+                "accessKeyId": "AK", "accessKeySecret": "SK",
+            },
+        }))
+        configs, default_name = load_configs(str(p))
+        assert default_name == "default"
+        assert list(configs) == ["default"]
+        assert configs["default"].maxcompute_endpoint == "https://mc.example.com"
+
+    def test_backward_compat_env_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAXCOMPUTE_ENDPOINT", "https://env.example.com")
+        configs, default_name = load_configs(str(tmp_path / "nonexistent.json"))
+        assert default_name == "default"
+        assert configs["default"].maxcompute_endpoint == "https://env.example.com"

@@ -82,6 +82,55 @@ cp config.example.json config.json
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | 可选的 STS token |
 | `ALIBABA_CLOUD_CREDENTIALS_URI` | 凭证服务 URI |
 
+### 命名配置（运行时切换）
+
+如果需要在不重启 MCP Server 的情况下切换地域、endpoint、项目或身份，可以创建本地多配置文件，例如 `config.multi.json`，并通过 `MAXCOMPUTE_CATALOG_CONFIG` 指向它：
+
+```json
+{
+  "default": "beijing",
+  "configs": {
+    "beijing": {
+      "region": "cn-beijing",
+      "description": "北京生产环境",
+      "maxcompute_endpoint": "https://service.cn-beijing.maxcompute.aliyun.com/api",
+      "accessKeyId": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
+      "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
+      "defaultProject": "<DEFAULT_PROJECT_NAME>",
+      "namespaceId": "<ALIBABACLOUD_ACCOUNT_UID>"
+    },
+    "singapore": {
+      "region": "ap-southeast-1",
+      "description": "新加坡生产环境",
+      "maxcompute_endpoint": "https://service.ap-southeast-1.maxcompute.aliyun.com/api",
+      "catalogapi_endpoint": "https://catalogapi.ap-southeast-1.maxcompute.aliyun.com",
+      "protocol": "https",
+      "accessKeyId": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
+      "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
+      "defaultProject": "<DEFAULT_PROJECT_NAME>",
+      "namespaceId": "<ALIBABACLOUD_ACCOUNT_UID>"
+    },
+    "intl-readonly": {
+      "region": "ap-southeast-1",
+      "description": "新加坡只读身份",
+      "maxcompute_endpoint": "https://service.ap-southeast-1.maxcompute.aliyun.com/api",
+      "catalogapi_endpoint": "https://catalogapi.ap-southeast-1.maxcompute.aliyun.com",
+      "protocol": "https",
+      "accessKeyId": "<READONLY_ALIBABA_CLOUD_ACCESS_KEY_ID>",
+      "accessKeySecret": "<READONLY_ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
+      "defaultProject": "<READONLY_DEFAULT_PROJECT_NAME>",
+      "namespaceId": "<ALIBABACLOUD_ACCOUNT_UID>"
+    }
+  }
+}
+```
+
+服务启动时使用 `default` 指定的配置；未指定 `default` 时使用第一个配置。可以通过 session 工具 `list_configs`、`get_current_config`、`use_config` 查看和切换当前配置。这些工具不会返回 AccessKey ID、AccessKey Secret 或 STS token。
+
+每个命名配置都必须提供 `maxcompute_endpoint`。如果省略 `catalogapi_endpoint`，还需要提供 `defaultProject`，以便服务通过 MaxCompute 自动解析 Catalog API endpoint。
+
+当前配置是进程级状态。运行时切换更适合 stdio / 单客户端场景。在共享的 Streamable HTTP 模式下，所有客户端共享同一个当前配置，一个客户端调用 `use_config` 会影响其他客户端。
+
 ## 运行
 
 ### stdio（默认）
@@ -95,6 +144,25 @@ uv run alibabacloud-maxcompute-mcp-server
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --port 8000
 ```
+
+## MCP 工具
+
+所有工具都通过 MCP text 响应返回 JSON。调用方应先检查 `success`，再读取 `data`、`summary` 或 `error`。
+
+| 分类 | 工具 | 用途 |
+| --- | --- | --- |
+| Catalog 发现 | `list_projects`, `get_project`, `list_schemas`, `get_schema`, `list_tables`, `get_table_schema`, `get_partition_info` | 浏览项目、schema、表、表结构、表元数据与分区 |
+| SQL 与实例 | `cost_sql`, `execute_sql`, `get_instance_status`, `get_instance` | 预估查询成本、执行只读 SQL、轮询实例状态、获取结果 |
+| 搜索与权限 | `search_meta_data`, `check_access` | 在 namespace 下搜索 Catalog 元数据，并查看当前身份 / 授权 |
+| 表管理 | `create_table`, `insert_values`, `update_table` | 建表、插入数据、更新表注释、标签、生命周期和列元数据 |
+| Session 配置 | `list_configs`, `get_current_config`, `use_config` | 列出命名配置、查看当前配置、运行时切换地域 / 身份 / 项目 |
+
+注意事项：
+
+- `execute_sql` 只允许只读查询。服务端会先做 SQL 类型校验，并在提交 MaxCompute 作业时强制带上只读 hint。
+- 生成 SQL 前建议先调用 `get_table_schema`，直接使用返回的 `sqlTableRef`；它会处理二级 / 三级模型下表名引用差异。
+- `search_meta_data` 依赖 `namespaceId` / `MAXCOMPUTE_NAMESPACE_ID`。
+- 大结果集可通过本地 `file://` `output_uri` 流式写盘；不传时结果以内联方式返回，超过上限会被截断。
 
 ## MCP 客户端接入
 

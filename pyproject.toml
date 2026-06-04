@@ -57,7 +57,7 @@ alibabacloud-maxcompute-mcp-server = "maxcompute_catalog_mcp.server:main"
 dev = [
   "pytest>=7",
   "pytest-cov>=4.0",
-  "anthropic>=0.40.0",
+  "anthropic>=0.87.0",
 ]
 
 # Default to Alibaba Cloud PyPI mirror; set UV_DEFAULT_INDEX=https://pypi.org/simple/ to use official PyPI
@@ -71,11 +71,17 @@ dev = [
 #   cryptography: CVE-2026-26007 (High, SECT subgroup attack) + CVE-2026-34073 (Low, DNS name constraint)
 #   requests: CVE-2026-25645 (Medium, predictable temp file in extract_zipped_paths)
 #   pygments: CVE-2026-4539 (Low, ReDoS in GUID regex)
+#   idna: CVE-2026-45409 (Medium, IDNA validation bypass)
+#   urllib3: CVE-2026-44431 + CVE-2026-44432 (High, redirect header leak + streaming decompression bomb bypass)
+#   aiohttp: CVE-2026-34993 + CVE-2026-47265 (Medium, CookieJar.load unsafe deserialization + cross-origin cookie redirect leak)
 constraint-dependencies = [
   "pyarrow>=14,<21",
   "cryptography>=46.0.6",
   "requests>=2.33.0",
   "pygments>=2.20.0",
+  "idna>=3.15",
+  "urllib3>=2.7.0",
+  "aiohttp>=3.14.0",
 ]
 
 [build-system]

@@ -1,12 +1,15 @@
 """Unit tests for each MCP tool (mocked SDK/client)."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import os
 import pytest
 
 from maxcompute_catalog_mcp.tools import Tools
+from maxcompute_catalog_mcp.tools_compute import _is_denied_path, _DENIED_PREFIXES, _DENIED_PREFIXES_POSIX, _DENIED_PREFIXES_WINDOWS
 
 # Import shared test helpers from conftest (pytest loads conftest automatically;
 # direct import works because tests/ is on sys.path during pytest collection)
@@ -901,7 +904,7 @@ def test_execute_sql_sync_with_output_uri_streams_to_file(
 
     r = tools.call("execute_sql", {
         "project": "p1", "sql": "SELECT c1, c2 FROM t",
-        "async": False, "output_uri": f"file://{out}",
+        "async": False, "output_uri": out.as_uri(),
     })
     payload = _text_payload(r)
     assert payload.get("success") is True
@@ -937,6 +940,7 @@ def test_execute_sql_rejects_empty_output_uri(tools: Tools) -> None:
     assert "empty" in payload.get("error", "").lower()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-specific system paths")
 def test_execute_sql_rejects_system_path_output_uri(tools: Tools) -> None:
     """output_uri pointing to sensitive system directories must be rejected."""
     for uri in ("file:///etc/passwd", "/bin/output.jsonl", "file:///proc/self/maps"):
@@ -947,6 +951,162 @@ def test_execute_sql_rejects_system_path_output_uri(tools: Tools) -> None:
         payload = _text_payload(r)
         assert payload.get("success") is False, f"Expected rejection for {uri}"
         assert "restricted" in payload.get("error", "").lower(), f"Missing 'restricted' in error for {uri}"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-specific denied paths")
+def test_execute_sql_rejects_private_etc_path(tools: Tools) -> None:
+    """output_uri directly targeting /private/etc (macOS symlink target) must be rejected."""
+    for uri in ("/private/etc/config", "file:///private/etc/hosts"):
+        r = tools.call("execute_sql", {
+            "project": "p1", "sql": "SELECT 1", "async": False,
+            "output_uri": uri,
+        })
+        payload = _text_payload(r)
+        assert payload.get("success") is False, f"Expected rejection for {uri}"
+        assert "restricted" in payload.get("error", "").lower(), f"Missing 'restricted' in error for {uri}"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-specific symlink resolution")
+def test_execute_sql_rejects_symlink_resolved_denied_path() -> None:
+    """output_uri whose resolved path (via symlink) hits a denied prefix must be rejected.
+
+    Simulates the macOS scenario where /etc is a symlink to /private/etc:
+    the raw_abs is /tmp/safe_output.jsonl (allowed) but resolve() returns
+    /private/etc/evil_config (denied). Verifies the `resolved` arm of the
+    dual-path check in _resolve_output_uri.
+    """
+    from maxcompute_catalog_mcp.tools_compute import _resolve_output_uri
+
+    with patch.object(Path, "resolve", return_value=Path("/private/etc/evil_config")):
+        with pytest.raises(ValueError, match="restricted"):
+            _resolve_output_uri("/tmp/safe_output.jsonl", create_dir=False)
+
+
+def test_execute_sql_rejects_file_uri_non_local_authority(tools: Tools) -> None:
+    """file:// URI with non-local authority (e.g. file://evilhost/path) must be rejected."""
+    for uri in ("file://evilhost/path/result.jsonl", "file://192.168.1.1/share/out.jsonl"):
+        r = tools.call("execute_sql", {
+            "project": "p1", "sql": "SELECT 1", "async": False,
+            "output_uri": uri,
+        })
+        payload = _text_payload(r)
+        assert payload.get("success") is False, f"Expected rejection for {uri}"
+        assert "authority" in payload.get("error", "").lower(), f"Missing 'authority' in error for {uri}"
+
+
+def test_execute_sql_accepts_file_uri_localhost(tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any) -> None:
+    """file://localhost/path is accepted (case-insensitive)."""
+    out = tmp_path / "local_out.jsonl"
+    inst = mock_maxcompute_client.run_sql.return_value
+    inst.is_terminated.return_value = True
+    inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
+
+    r = tools.call("execute_sql", {
+        "project": "p1", "sql": "SELECT c1 FROM t",
+        "async": False, "output_uri": "file://localhost" + Path(out).as_uri()[len("file://"):],
+    })
+    payload = _text_payload(r)
+    assert payload.get("success") is True, f"localhost authority should be accepted, got: {payload}"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-specific dot-segment paths")
+def test_execute_sql_accepts_dot_segment_path_escaping_denied_prefix(
+    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+) -> None:
+    """A path like /etc/../home/user/out.jsonl must NOT be rejected — dot segments normalize away."""
+    # Construct a path that lexically contains /etc but normalizes to a safe directory
+    dot_path = f"/etc/../{str(tmp_path).lstrip('/')}/out.jsonl"
+    inst = mock_maxcompute_client.run_sql.return_value
+    inst.is_terminated.return_value = True
+    inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
+    r = tools.call("execute_sql", {
+        "project": "p1", "sql": "SELECT 1", "async": False,
+        "output_uri": dot_path,
+    })
+    payload = _text_payload(r)
+    assert payload.get("success") is True, f"Dot-segment path should be accepted, got: {payload}"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-specific dot-segment paths")
+def test_execute_sql_rejects_dot_segment_into_denied_prefix(tools: Tools) -> None:
+    """A path like /tmp/../etc/passwd must be rejected after normalization."""
+    r = tools.call("execute_sql", {
+        "project": "p1", "sql": "SELECT 1", "async": False,
+        "output_uri": "/tmp/../etc/passwd",
+    })
+    payload = _text_payload(r)
+    assert payload.get("success") is False
+    assert "restricted" in payload.get("error", "").lower()
+
+
+def test_execute_sql_partial_file_pre_existing_rejected(
+    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+) -> None:
+    """If a .partial file already exists (simulating symlink attack), the write must fail."""
+    out = tmp_path / "result.jsonl"
+    partial = tmp_path / "result.inst-001.jsonl.partial"
+    # Pre-create the .partial file to simulate a TOCTOU attack
+    partial.write_text("attacker content")
+    inst = mock_maxcompute_client.run_sql.return_value
+    inst.is_terminated.return_value = True
+    inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
+
+    r = tools.call("execute_sql", {
+        "project": "p1", "sql": "SELECT c1 FROM t",
+        "async": False, "output_uri": out.as_uri(),
+    })
+    payload = _text_payload(r)
+    assert payload.get("success") is False
+    assert "partial" in payload.get("error", "").lower() or "already exists" in payload.get("error", "").lower()
+
+
+def test_execute_sql_partial_file_symlink_rejected(
+    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+) -> None:
+    """If .partial path is a symlink (O_NOFOLLOW triggers ELOOP), the write must fail."""
+    import errno
+    out = tmp_path / "result.jsonl"
+    inst = mock_maxcompute_client.run_sql.return_value
+    inst.is_terminated.return_value = True
+    inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
+
+    # Simulate O_NOFOLLOW raising ELOOP by patching os.open
+    with patch("maxcompute_catalog_mcp.tools_compute.os.open", side_effect=OSError(errno.ELOOP, "Too many levels of symbolic links")):
+        r = tools.call("execute_sql", {
+            "project": "p1", "sql": "SELECT c1 FROM t",
+            "async": False, "output_uri": out.as_uri(),
+        })
+    payload = _text_payload(r)
+    assert payload.get("success") is False
+    assert "symlink" in payload.get("error", "").lower()
+
+
+def test_execute_sql_output_uri_works_without_onofollow(
+    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+) -> None:
+    """On platforms without O_NOFOLLOW (e.g. Windows), output_uri still works."""
+    import maxcompute_catalog_mcp.tools_compute as tc_mod
+    out = tmp_path / "no_follow.jsonl"
+    inst = mock_maxcompute_client.run_sql.return_value
+    inst.is_terminated.return_value = True
+    inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
+
+    # Simulate Windows: os module has no O_NOFOLLOW attribute.
+    # patch.object cannot remove an attribute (setting to None breaks
+    # the `flags |= os.O_NOFOLLOW` path), so delattr is the correct approach.
+    original = getattr(tc_mod.os, "O_NOFOLLOW", None)
+    try:
+        if hasattr(tc_mod.os, "O_NOFOLLOW"):
+            delattr(tc_mod.os, "O_NOFOLLOW")
+        r = tools.call("execute_sql", {
+            "project": "p1", "sql": "SELECT c1 FROM t",
+            "async": False, "output_uri": out.as_uri(),
+        })
+    finally:
+        if original is not None:
+            tc_mod.os.O_NOFOLLOW = original
+    payload = _text_payload(r)
+    assert payload.get("success") is True, f"Should succeed without O_NOFOLLOW, got: {payload}"
 
 
 def test_execute_sql_accepts_bare_path_output_uri(
@@ -1003,7 +1163,7 @@ def test_execute_sql_partial_write_cleaned_up_on_reader_failure(
 
     r = tools.call("execute_sql", {
         "project": "p1", "sql": "SELECT c1 FROM t",
-        "async": False, "output_uri": f"file://{out}",
+        "async": False, "output_uri": out.as_uri(),
     })
     payload = _text_payload(r)
     assert payload.get("success") is False
@@ -1024,7 +1184,7 @@ def test_execute_sql_async_with_output_uri_does_not_create_parent_dir(
 
     r = tools.call("execute_sql", {
         "project": "p1", "sql": "SELECT 1",
-        "async": True, "output_uri": f"file://{out}",
+        "async": True, "output_uri": out.as_uri(),
     })
     payload = _text_payload(r)
     assert payload.get("success") is True
@@ -1078,7 +1238,7 @@ def test_get_instance_with_output_uri_streams_all_rows(
 
     r = tools.call("get_instance", {
         "project": "p1", "instanceId": "inst-001",
-        "output_uri": f"file://{out}",
+        "output_uri": out.as_uri(),
     })
     payload = _text_payload(r)
     task_entry = payload["results"]["AnonymousSQLTask"]
@@ -1107,7 +1267,7 @@ def test_get_instance_multi_task_disambiguates_with_instanceid_and_task_name(
 
     r = tools.call("get_instance", {
         "project": "p1", "instanceId": "inst-001",
-        "output_uri": f"file://{out}",
+        "output_uri": out.as_uri(),
     })
     payload = _text_payload(r)
     a_path = tmp_path / "bundle.inst-001.TaskA.jsonl"
@@ -2773,3 +2933,208 @@ def test_get_instance_reader_exception(
     payload = _text_payload(r)
     assert "error" in payload["results"]["BadTask"]
     assert "reader broken" in payload["results"]["BadTask"]["error"]
+
+
+# ---------------------------------------------------------------------------
+# Direct unit tests for _is_denied_path helper
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX-specific denied paths")
+class TestIsDeniedPath:
+    """Direct unit tests for the _is_denied_path() path validation helper."""
+
+    def test_exact_match_denied(self) -> None:
+        """An exact denied prefix path (e.g. /etc) is itself denied."""
+        assert _is_denied_path(Path("/etc")) is True
+        assert _is_denied_path(Path("/bin")) is True
+        assert _is_denied_path(Path("/dev")) is True
+
+    def test_child_of_denied_prefix(self) -> None:
+        """Paths under a denied prefix are also denied."""
+        assert _is_denied_path(Path("/etc/passwd")) is True
+        assert _is_denied_path(Path("/usr/bin/python3")) is True
+        assert _is_denied_path(Path("/private/etc/hosts")) is True
+
+    def test_deeply_nested_child(self) -> None:
+        """Deeply nested paths under a denied prefix are still denied."""
+        assert _is_denied_path(Path("/etc/foo/bar/baz/config")) is True
+
+    def test_non_denied_path_not_rejected(self) -> None:
+        """Paths not under any denied prefix are accepted."""
+        assert _is_denied_path(Path("/home/user/out.jsonl")) is False
+        assert _is_denied_path(Path("/tmp/result.jsonl")) is False
+        assert _is_denied_path(Path("/var/folders/xx/result.jsonl")) is False
+
+    def test_prefix_string_not_false_positive(self) -> None:
+        """A path that shares a string prefix but is not under the denied dir is accepted."""
+        assert _is_denied_path(Path("/etc2/myconfig")) is False
+        assert _is_denied_path(Path("/bin2/tool")) is False
+
+    def test_all_denied_prefixes_covered(self) -> None:
+        """Every entry in _DENIED_PREFIXES is detected as denied."""
+        for prefix in _DENIED_PREFIXES:
+            assert _is_denied_path(prefix) is True, f"{prefix} should be denied"
+            child = prefix / "some_child"
+            assert _is_denied_path(child) is True, f"{child} should be denied"
+
+
+class TestIsDeniedPathWindows:
+    """Tests for _is_denied_path() Windows case-insensitive logic.
+
+    Uses mocking to test the Windows branch on any platform.
+    """
+
+    @staticmethod
+    def _is_denied_win(path: Path, prefixes: tuple) -> bool:
+        import maxcompute_catalog_mcp.tools_compute as tc_mod
+        prefixes_lc = tuple(str(p).lower() for p in prefixes)
+        with patch.object(tc_mod.os, "name", "nt"), \
+             patch.object(tc_mod, "_DENIED_PREFIXES", prefixes), \
+             patch.object(tc_mod, "_DENIED_PREFIXES_WIN_LC", prefixes_lc):
+            return tc_mod._is_denied_path(path)
+
+    def test_case_insensitive_exact_match(self) -> None:
+        from pathlib import PureWindowsPath
+        prefixes = (PureWindowsPath("C:\\Windows"),)
+        assert self._is_denied_win(PureWindowsPath("c:/windows"), prefixes) is True
+        assert self._is_denied_win(PureWindowsPath("C:/WINDOWS"), prefixes) is True
+
+    def test_case_insensitive_child(self) -> None:
+        from pathlib import PureWindowsPath
+        prefixes = (PureWindowsPath("C:\\Windows"),)
+        assert self._is_denied_win(PureWindowsPath("C:/WINDOWS/System32/evil.jsonl"), prefixes) is True
+        assert self._is_denied_win(PureWindowsPath("c:/windows/system32/drivers"), prefixes) is True
+
+    def test_different_prefix_not_false_positive(self) -> None:
+        from pathlib import PureWindowsPath
+        prefixes = (PureWindowsPath("C:\\Windows"),)
+        assert self._is_denied_win(PureWindowsPath("C:/Windows2/app"), prefixes) is False
+        assert self._is_denied_win(PureWindowsPath("C:/Users/safe.jsonl"), prefixes) is False
+
+    def test_drive_root_not_false_positive(self) -> None:
+        from pathlib import PureWindowsPath
+        prefixes = (PureWindowsPath("C:\\Windows"),)
+        assert self._is_denied_win(PureWindowsPath("C:/"), prefixes) is False
+
+
+# ---- Windows path handling tests ----
+
+class TestWindowsPathHandling:
+    """Tests for Windows path parsing in _resolve_output_uri.
+
+    Uses _resolve_output_uri directly (no full MCP stack) to test
+    Windows drive-letter detection, file:// URI parsing, and UNC rejection.
+    """
+
+    @staticmethod
+    def _resolve(uri: str) -> Path:
+        from maxcompute_catalog_mcp.tools_compute import _resolve_output_uri
+        return _resolve_output_uri(uri, create_dir=False)
+
+    def test_bare_windows_path_rejected_on_posix(self) -> None:
+        """Bare Windows path like C:/Users/out.jsonl must be rejected on non-Windows."""
+        if os.name == "nt":
+            pytest.skip("Test only applies to non-Windows platforms")
+        with pytest.raises(ValueError, match="Windows-style"):
+            self._resolve("C:/Users/out.jsonl")
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows-specific file:// URI")
+    def test_file_uri_windows_drive_letter(self) -> None:
+        """file:///C:/... URI must parse correctly on Windows."""
+        import tempfile
+        tmpdir = tempfile.gettempdir()
+        uri = Path(tmpdir, "test_win.jsonl").as_uri()
+        result = self._resolve(uri)
+        assert result.drive == Path(tmpdir).drive
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows-specific denied prefixes")
+    def test_windows_system_directory_denied(self) -> None:
+        """Windows system directories must be denied."""
+        for uri in ("C:/Windows/System32/evil.jsonl", "C:/Program Files/app/out.jsonl"):
+            with pytest.raises(ValueError, match="restricted"):
+                self._resolve(uri)
+
+    def test_unc_path_rejected(self) -> None:
+        """UNC paths (backslash-backslash server share) must be rejected."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve(r"\\server\share\out.jsonl")
+
+    def test_unc_double_slash_rejected(self) -> None:
+        """//server/share form UNC path must be rejected."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve("//server/share/out.jsonl")
+
+    def test_percent_encoded_uri_decoded(self) -> None:
+        """Percent-encoded characters in file:// URI (e.g. %20) must be decoded."""
+        import tempfile
+        tmpdir = tempfile.gettempdir()
+        safe_path = os.path.join(tmpdir, "space dir", "out.jsonl")
+        uri = Path(safe_path).as_uri()
+        assert "%20" in uri
+        try:
+            result = self._resolve(uri)
+        except ValueError as e:
+            if "restricted" in str(e).lower():
+                pytest.skip("Path resolves to restricted directory")
+            raise
+        except OSError:
+            pytest.skip("Path does not exist on this platform")
+        assert "%20" not in str(result)
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows-specific denied prefixes")
+    def test_windows_denied_prefixes_populated(self) -> None:
+        """On Windows, _DENIED_PREFIXES must contain system dirs from env vars."""
+        assert _DENIED_PREFIXES is _DENIED_PREFIXES_WINDOWS
+        assert len(_DENIED_PREFIXES) > 0
+        prefix_strs = [str(p) for p in _DENIED_PREFIXES]
+        assert any("Windows" in s or "WINDOWS" in s for s in prefix_strs)
+
+    def test_file_uri_unc_bypass_rejected(self) -> None:
+        """file:////server/share must be rejected as UNC after url2pathname."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve("file:////server/share/out.jsonl")
+
+    def test_file_uri_localhost_unc_bypass_rejected(self) -> None:
+        """file://localhost//server/share must be rejected as UNC after url2pathname."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve("file://localhost//server/share/out.jsonl")
+
+    def test_windows_file_uri_rejected_on_posix(self) -> None:
+        """file:///C:/... URI must be rejected on non-Windows platforms.
+
+        On POSIX, url2pathname returns /C:/... which should be caught as
+        a Windows-style path, not treated as a valid POSIX absolute path.
+        """
+        if os.name == "nt":
+            pytest.skip("Test only applies to non-Windows platforms")
+        with pytest.raises(ValueError, match="Windows-style"):
+            self._resolve("file:///C:/Users/out.jsonl")
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows-specific: percent-encoded UNC in file:// URI")
+    def test_file_uri_percent_encoded_unc_rejected(self) -> None:
+        """file:///%5C%5Cserver%5Cshare must be rejected as UNC on Windows."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve("file:///%5C%5Cserver%5Cshare%5Cout.jsonl")
+
+    def test_mixed_separator_unc_rejected(self) -> None:
+        """Mixed-separator UNC-like paths (backslash-slash server) must be rejected."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve(r"\/server/share/out.jsonl")
+
+    def test_triple_slash_non_file_uri_rejected(self) -> None:
+        """///server/share (no file: scheme) must be rejected as UNC."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve("///server/share/out.jsonl")
+
+    def test_malformed_file_uri_raises_valueerror(self) -> None:
+        """Malformed file:// URI that causes url2pathname OSError must raise ValueError."""
+        import unittest.mock
+        with unittest.mock.patch("maxcompute_catalog_mcp.tools_compute.url2pathname", side_effect=OSError("bad URI")):
+            with pytest.raises(ValueError, match="Malformed"):
+                self._resolve("file:///some/path/out.jsonl")
+
+    def test_leading_whitespace_unc_bypass_rejected(self) -> None:
+        """URI with leading whitespace before UNC path must be rejected."""
+        with pytest.raises(ValueError, match="UNC"):
+            self._resolve("  //server/share/out.jsonl")

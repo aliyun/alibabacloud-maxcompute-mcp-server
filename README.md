@@ -82,6 +82,55 @@ You can skip the JSON file entirely and configure the server through environment
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | Optional STS token. |
 | `ALIBABA_CLOUD_CREDENTIALS_URI` | Credential provider URI. |
 
+### Named configs (runtime switching)
+
+To switch between regions, endpoints, projects, or identities without restarting the MCP server, create a local multi-config file such as `config.multi.json` and point `MAXCOMPUTE_CATALOG_CONFIG` to it:
+
+```json
+{
+  "default": "beijing",
+  "configs": {
+    "beijing": {
+      "region": "cn-beijing",
+      "description": "Beijing production",
+      "maxcompute_endpoint": "https://service.cn-beijing.maxcompute.aliyun.com/api",
+      "accessKeyId": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
+      "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
+      "defaultProject": "<DEFAULT_PROJECT_NAME>",
+      "namespaceId": "<ALIBABACLOUD_ACCOUNT_UID>"
+    },
+    "singapore": {
+      "region": "ap-southeast-1",
+      "description": "Singapore production",
+      "maxcompute_endpoint": "https://service.ap-southeast-1.maxcompute.aliyun.com/api",
+      "catalogapi_endpoint": "https://catalogapi.ap-southeast-1.maxcompute.aliyun.com",
+      "protocol": "https",
+      "accessKeyId": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
+      "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
+      "defaultProject": "<DEFAULT_PROJECT_NAME>",
+      "namespaceId": "<ALIBABACLOUD_ACCOUNT_UID>"
+    },
+    "intl-readonly": {
+      "region": "ap-southeast-1",
+      "description": "Singapore readonly identity",
+      "maxcompute_endpoint": "https://service.ap-southeast-1.maxcompute.aliyun.com/api",
+      "catalogapi_endpoint": "https://catalogapi.ap-southeast-1.maxcompute.aliyun.com",
+      "protocol": "https",
+      "accessKeyId": "<READONLY_ALIBABA_CLOUD_ACCESS_KEY_ID>",
+      "accessKeySecret": "<READONLY_ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
+      "defaultProject": "<READONLY_DEFAULT_PROJECT_NAME>",
+      "namespaceId": "<ALIBABACLOUD_ACCOUNT_UID>"
+    }
+  }
+}
+```
+
+The server starts with `default` (or the first config when `default` is omitted). Use the session tools `list_configs`, `get_current_config`, and `use_config` to inspect and switch the active config at runtime. These tools never return AccessKey IDs, AccessKey secrets, or STS tokens.
+
+Each named config must provide `maxcompute_endpoint`. If `catalogapi_endpoint` is omitted, also provide `defaultProject` so the server can resolve the Catalog API endpoint through MaxCompute.
+
+The active config is process-global. Runtime switching is best suited to stdio / single-client usage. In shared Streamable HTTP mode, all connected clients share the same active config, so a `use_config` call from one client affects the others.
+
 ## Running
 
 ### stdio (default)
@@ -95,6 +144,25 @@ uv run alibabacloud-maxcompute-mcp-server
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --port 8000
 ```
+
+## MCP tools
+
+All tools return JSON in an MCP text response. Check `success` first, then read `data`, `summary`, or `error`.
+
+| Category | Tools | Purpose |
+| --- | --- | --- |
+| Catalog discovery | `list_projects`, `get_project`, `list_schemas`, `get_schema`, `list_tables`, `get_table_schema`, `get_partition_info` | Browse projects, schemas, tables, table schemas, table metadata, and partitions. |
+| SQL and instances | `cost_sql`, `execute_sql`, `get_instance_status`, `get_instance` | Estimate query cost, run read-only SQL, poll instances, and retrieve results. |
+| Search and access | `search_meta_data`, `check_access` | Search Catalog metadata under a namespace and inspect the current identity / grants. |
+| Table management | `create_table`, `insert_values`, `update_table` | Create tables, insert rows, and update table comments, labels, lifecycle, and column metadata. |
+| Session config | `list_configs`, `get_current_config`, `use_config` | List named configs, inspect the active config, and switch region / identity / project at runtime. |
+
+Notes:
+
+- `execute_sql` is read-only by design. The server validates SQL client-side and also submits jobs with the MaxCompute read-only hint.
+- For SQL table references, call `get_table_schema` first and use the returned `sqlTableRef`; this handles two-level and three-level project naming.
+- `search_meta_data` requires `namespaceId` / `MAXCOMPUTE_NAMESPACE_ID`.
+- Large query results can be streamed to a local `file://` `output_uri`; otherwise responses are returned inline and may be truncated.
 
 ## MCP client setup
 

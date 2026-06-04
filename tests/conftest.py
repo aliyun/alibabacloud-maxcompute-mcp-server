@@ -67,9 +67,7 @@ def data(payload: dict) -> dict:
 
 def has_config() -> bool:
     """Check whether a config file exists for integration tests."""
-    import os
-    p = os.environ.get("MAXCOMPUTE_CATALOG_CONFIG") or str(Path(__file__).resolve().parent.parent / "config.json")
-    return Path(p).exists()
+    return _real_config_path().exists()
 
 
 def uniq(prefix: str) -> str:
@@ -284,67 +282,54 @@ def async_wait_instance(
 
 # ---- Real config / integration ----
 
-@pytest.fixture(scope="module")
-def real_config():
-    """Load config from file; skip if missing or invalid."""
+def _real_config_path() -> Path:
     import os
-    from maxcompute_catalog_mcp.config import load_config
+
     project_root = Path(__file__).resolve().parent.parent
-    config_path = os.environ.get("MAXCOMPUTE_CATALOG_CONFIG") or str(project_root / "config.json")
-    if not Path(config_path).exists():
+    config_path = os.environ.get("MAXCOMPUTE_CATALOG_CONFIG")
+    return Path(config_path) if config_path else project_root / "config.json"
+
+
+@pytest.fixture(scope="module")
+def real_configs():
+    """Load all configs from file once per module; skip if missing or invalid."""
+    from maxcompute_catalog_mcp.config import load_configs
+
+    config_path = _real_config_path()
+    if not config_path.exists():
         pytest.skip("no config file (config.json or MAXCOMPUTE_CATALOG_CONFIG) for integration tests")
     try:
-        return load_config(config_path)
+        return load_configs(str(config_path))
     except Exception as e:
         pytest.skip(f"config load failed: {e}")
 
 
 @pytest.fixture(scope="module")
-def real_tools(real_config):
-    """Tools instance built from real config (real Catalog + compute API). Skip if no config."""
-    from dataclasses import replace
-    from maxcompute_catalog_mcp.config import (
-        resolve_catalogapi_endpoint_with_client,
-        resolve_protocol_and_endpoints,
-    )
-    from maxcompute_catalog_mcp.credentials import get_credentials_client
-    from maxcompute_catalog_mcp.maxcompute_client import MaxComputeCatalogSdk, MaxComputeClient
+def real_config(real_configs):
+    """Default config object for existing integration tests."""
+    configs, default_name = real_configs
+    return configs[default_name]
+
+
+@pytest.fixture(scope="module")
+def real_tools(real_configs):
+    """Tools instance matching server.build_tools() — full multi-config support."""
+    from maxcompute_catalog_mcp.client_factory import build_client_set
+
     Tools = _get_tools_class()
-    # Prefer AK/SK from config.json; fall back to default credential chain
-    credential_client = get_credentials_client(
-        access_key_id=real_config.access_key_id,
-        access_key_secret=real_config.access_key_secret,
-        security_token=real_config.security_token,
-    )
-    # Resolve transport protocol + endpoints once, then thread through both factories
-    resolved = resolve_protocol_and_endpoints(real_config)
-    # Create MaxCompute client first
-    maxcompute_client = MaxComputeClient.create(
-        real_config, credential_client=credential_client, resolved=resolved,
-    )
-
-    # Resolve catalogapi_endpoint
-    cfg = real_config
-    if not cfg.catalogapi_endpoint:
-        if maxcompute_client is None:
-            pytest.skip("Cannot create MaxCompute client to resolve catalogapi_endpoint")
-        try:
-            catalogapi_endpoint = resolve_catalogapi_endpoint_with_client(
-                maxcompute_client._client,
-                resolved.maxcompute_url,
-            )
-            cfg = replace(cfg, catalogapi_endpoint=catalogapi_endpoint)
-            resolved = resolve_protocol_and_endpoints(cfg)
-        except Exception as e:
-            pytest.skip(f"Failed to resolve catalogapi_endpoint: {e}")
-
-    sdk = MaxComputeCatalogSdk.create(
-        cfg, credential_client=credential_client, resolved=resolved,
-    )
+    configs, default_name = real_configs
+    try:
+        cs = build_client_set(configs[default_name])
+    except (ValueError, RuntimeError) as e:
+        pytest.skip(f"Failed to build client set: {e}")
+    except Exception as e:
+        pytest.skip(f"Failed to build client set: {type(e).__name__}: {e}")
     return Tools(
-        sdk=sdk,
-        default_project=cfg.default_project or "",
-        namespace_id=cfg.namespace_id or "",
-        maxcompute_client=maxcompute_client,
-        credential_client=credential_client,
+        sdk=cs.sdk,
+        default_project=cs.default_project,
+        namespace_id=cs.namespace_id,
+        maxcompute_client=cs.maxcompute_client,
+        credential_client=cs.credential_client,
+        configs=configs,
+        default_name=default_name,
     )

@@ -51,6 +51,8 @@ class MaxComputeCatalogConfig:
     default_project: str = ""
     namespace_id: str = ""  # main account UID for Catalog API namespaces/:search
     protocol: str = ""  # "" | "http" | "https"; empty means infer per-client
+    region: str = ""  # display-only label for named configs (e.g. cn-hangzhou); not used for connection
+    description: str = ""  # display-only human note for named configs; not used for connection
 
 
 @dataclass(frozen=True)
@@ -206,3 +208,79 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
         namespace_id=namespace_id,
         protocol=protocol,
     )
+
+
+def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
+    """Parse one named-config bundle (dict-only, NO environment overrides).
+
+    Used by load_configs() for each entry under the top-level "configs" object.
+    Field-name variants mirror load_config(). region/description are display-only.
+    """
+    def pick(*keys: str) -> str:
+        for k in keys:
+            v = conn.get(k)
+            if v:
+                return v.strip() if isinstance(v, str) else str(v)
+        return ""
+
+    maxcompute_endpoint = pick("maxcompute_endpoint", "maxcomputeEndpoint", "sdkEndpoint")
+    if not maxcompute_endpoint:
+        raise ValueError("missing required 'maxcompute_endpoint'")
+    protocol = pick("protocol").lower()
+    if protocol not in _ALLOWED_PROTOCOLS:
+        raise ValueError(f"invalid protocol value {protocol!r}; allowed: {{'', 'http', 'https'}}")
+
+    return MaxComputeCatalogConfig(
+        catalogapi_endpoint=pick("catalogapi_endpoint", "catalogapiEndpoint", "endpoint"),
+        maxcompute_endpoint=maxcompute_endpoint,
+        access_key_id=pick("accessKeyId", "access_key_id"),
+        access_key_secret=pick("accessKeySecret", "access_key_secret"),
+        security_token=pick("securityToken", "security_token"),
+        default_project=pick("defaultProject", "default_project"),
+        namespace_id=pick("namespaceId", "namespace_id", "account_uid"),
+        protocol=protocol,
+        region=pick("region"),
+        description=pick("description", "desc"),
+    )
+
+
+def load_configs(
+    config_path: str | None = None,
+) -> Tuple[Dict[str, MaxComputeCatalogConfig], str]:
+    """Load one-or-many named configs. Returns (configs_by_name, default_name).
+
+    - If the JSON file has a top-level "configs" object: parse each named bundle
+      (no env overrides per bundle); default = json["default"] or first key.
+    - Otherwise (legacy single "maxcompute"/"odps", or env-only): delegate to
+      load_config() and return it under the name "default".
+
+    This keeps full backward compatibility: existing single-config files and
+    env-only setups behave exactly as before, surfaced as a single config
+    named "default".
+    """
+    path = Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
+    raw: Dict[str, Any] = {}
+    if path.exists():
+        raw = json.loads(path.read_text(encoding="utf-8")) or {}
+
+    configs_obj = raw.get("configs")
+    if isinstance(configs_obj, dict) and configs_obj:
+        configs: Dict[str, MaxComputeCatalogConfig] = {}
+        for name, bundle in configs_obj.items():
+            if not isinstance(bundle, dict):
+                raise ValueError(f"config {name!r} must be an object")
+            try:
+                configs[name] = _config_from_bundle(bundle)
+            except ValueError as e:
+                raise ValueError(f"invalid named config {name!r}: {e}") from e
+        default_name = (raw.get("default") or "").strip() or next(iter(configs))
+        if default_name not in configs:
+            raise ValueError(
+                f"default config {default_name!r} not found in 'configs'; "
+                f"available: {sorted(configs)}"
+            )
+        return configs, default_name
+
+    # Legacy single-config / env-only path → one config named "default".
+    single = load_config(config_path)
+    return {"default": single}, "default"
