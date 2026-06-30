@@ -7,6 +7,15 @@
 
 基于 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 的阿里云 [MaxCompute](https://www.aliyun.com/product/odps) 服务端。将 Catalog API 与计算能力封装为 MCP 工具，供 Cursor、Claude Code 等 AI 助手通过 stdio 或 Streamable HTTP 列出项目/schema/表、搜索元数据、预估与执行 SQL、管理 MaxCompute 实例。
 
+> [!IMPORTANT]
+> 推荐优先使用 MaxCompute Remote MCP Server。请先阅读托管版 Remote MCP
+> 服务文档：[MaxCompute MCP 服务（Remote MCP Server）](https://www.alibabacloud.com/help/zh/maxcompute/getting-started/mcmcp-service-remote-mcp-server)。
+>
+> 本仓库继续保留 local MCP server 代码，适用于自托管、开发调试和特殊本地
+> stdio 场景。Remote MCP 推进期间，公开且不含敏感信息的反馈可以通过本仓库的
+> [Remote MCP issue 模板](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues/new?template=remote-mcp-service-feedback.md)
+> 提交。
+
 ## 能力概览
 
 - **Catalog**：列出项目 / schema / 表；获取项目、schema、表及分区详情
@@ -17,13 +26,45 @@
 - **身份与权限**：`check_access` 合并身份发现与权限查询
 - **传输层**：stdio（默认，适合 IDE 集成）与内置 Streamable HTTP（无需 mcp-proxy）
 
-## 运行要求
+## Remote MCP Server（推荐）
+
+除非你明确需要 local `stdio` 或自托管方式，否则建议优先使用托管版
+MaxCompute Remote MCP Server。Remote MCP 服务减少本地运行环境和 MCP
+服务端凭证配置成本，使用 Streamable HTTP，并按阿里云官方接入流程完成授权。
+
+接入步骤、支持地域、OAuth 登录流程、工具能力和安全注意事项见：
+
+- [MaxCompute MCP 服务（Remote MCP Server）](https://www.alibabacloud.com/help/zh/maxcompute/getting-started/mcmcp-service-remote-mcp-server)
+
+### Remote MCP 反馈
+
+公开且不含敏感信息的 Remote MCP 反馈可以通过本仓库 issues 提交：
+
+- [提交 Remote MCP 反馈](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues/new?template=remote-mcp-service-feedback.md)
+- [查看已有 issues](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues)
+
+建议包含 MCP Client 名称和版本、Endpoint 类型、工具名、request ID、带时区的时间窗口、
+地域、脱敏后的错误码和错误信息、期望行为、实际行为以及复现步骤。
+
+不要在公开 issue 中包含 access token、refresh token、授权码、Cookie、AccessKey ID
+或 Secret、带 query 参数的 OAuth callback URL、敏感 SQL、客户数据或敏感 Logview
+内容。账号级权限、账单、SLA、生产故障、安全漏洞或包含机密数据的问题，请使用阿里云
+官方支持或安全渠道。
+
+## Local MCP Server（可选）
+
+以下内容说明本仓库中的 local MCP server。仅在需要自托管、stdio 集成、本地开发
+或直接控制凭证时使用 local server；托管版服务请优先参考上文 Remote MCP 文档。
+
+### 运行要求
+
+Local MCP server 需要：
 
 - Python 3.10+
 - [`uv`](https://docs.astral.sh/uv/)（推荐的依赖管理工具）
 - 可访问的 MaxCompute 项目以及 AK / STS 凭证 / 凭证服务 URI
 
-## 源码安装
+### 安装
 
 首个开源版本仅以源码仓形式发布。本阶段不提供 PyPI 与 standalone 独立发行版。
 
@@ -39,7 +80,7 @@ uv sync
 uv run alibabacloud-maxcompute-mcp-server --help
 ```
 
-## 配置
+### 配置
 
 复制公共示例到本地，并填入实际值：
 
@@ -50,7 +91,7 @@ cp config.example.json config.json
 
 `config.json` 默认被 `.gitignore` 忽略，切勿提交。
 
-### 配置字段
+#### 配置字段
 
 | 字段 | 是否必填 | 说明 |
 | --- | --- | --- |
@@ -61,14 +102,14 @@ cp config.example.json config.json
 | `maxcompute.protocol` | 可选 | `https`（默认）或 `http` |
 | `maxcompute.accessKeyId` / `accessKeySecret` | 可选 | 静态凭证，仅供开发调试；生产环境建议使用凭证服务 URI |
 
-### 凭证优先级
+#### 凭证优先级
 
 1. 环境变量 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`（可选携带 `ALIBABA_CLOUD_SECURITY_TOKEN`）
 2. `ALIBABA_CLOUD_CREDENTIALS_URI` 指向的本地凭证服务
 3. 阿里云默认凭证链（环境变量 / 配置文件 / ECS RAM Role 等）
 4. `config.json` 中的静态 `accessKeyId` / `accessKeySecret`（优先级最低，仅供开发）
 
-### 仅使用环境变量
+#### 仅使用环境变量
 
 也可以完全不写 JSON 配置，通过环境变量驱动：
 
@@ -82,7 +123,7 @@ cp config.example.json config.json
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | 可选的 STS token |
 | `ALIBABA_CLOUD_CREDENTIALS_URI` | 凭证服务 URI |
 
-### 命名配置（运行时切换）
+#### 命名配置（运行时切换）
 
 如果需要在不重启 MCP Server 的情况下切换地域、endpoint、项目或身份，可以创建本地多配置文件，例如 `config.multi.json`，并通过 `MAXCOMPUTE_CATALOG_CONFIG` 指向它：
 
@@ -131,21 +172,21 @@ cp config.example.json config.json
 
 当前配置是进程级状态。运行时切换更适合 stdio / 单客户端场景。在共享的 Streamable HTTP 模式下，所有客户端共享同一个当前配置，一个客户端调用 `use_config` 会影响其他客户端。
 
-## 运行
+### 运行
 
-### stdio（默认）
+#### stdio（默认）
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server
 ```
 
-### Streamable HTTP
+#### Streamable HTTP
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --port 8000
 ```
 
-## MCP 工具
+### MCP 工具
 
 所有工具都通过 MCP text 响应返回 JSON。调用方应先检查 `success`，再读取 `data`、`summary` 或 `error`。
 
@@ -164,9 +205,9 @@ uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --po
 - `search_meta_data` 依赖 `namespaceId` / `MAXCOMPUTE_NAMESPACE_ID`。
 - 大结果集可通过本地 `file://` `output_uri` 流式写盘；不传时结果以内联方式返回，超过上限会被截断。
 
-## MCP 客户端接入
+### MCP 客户端接入
 
-### Cursor / Claude Code（stdio，使用配置文件）
+#### Cursor / Claude Code（stdio，使用配置文件）
 
 ```json
 {
@@ -187,7 +228,7 @@ uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --po
 }
 ```
 
-### Cursor / Claude Code（stdio，仅环境变量）
+#### Cursor / Claude Code（stdio，仅环境变量）
 
 ```json
 {
@@ -212,11 +253,11 @@ uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --po
 }
 ```
 
-### Streamable HTTP
+#### Streamable HTTP
 
 先按上文启动服务端，再将 MCP 客户端地址指向 `http://127.0.0.1:8000/mcp`。
 
-## 开发
+### 开发
 
 ```bash
 uv sync --all-extras
@@ -224,7 +265,7 @@ uv run pytest tests/ -q
 uv build
 ```
 
-### 包名与模块名
+#### 包名与模块名
 
 | 名称 | 上下文 |
 | --- | --- |
@@ -236,7 +277,8 @@ uv build
 ## 参与贡献
 
 - 这是首个开源源码版本。本阶段**不**提供 PyPI 包和 GitHub Release 构件
-- 欢迎提交 Pull Request 和 Issue。进行较大改动前请先开 Issue 讨论
+- 欢迎提交 Pull Request 和 Issue。Remote MCP 服务反馈请使用 Remote MCP issue 模板；
+  local server 代码较大改动请先开 Issue 讨论
 
 ## 开源协议
 

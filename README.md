@@ -7,6 +7,16 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It exposes Catalog API and compute capabilities as MCP tools so that AI assistants such as Cursor and Claude Code can list projects / schemas / tables, search metadata, estimate and execute SQL, and manage MaxCompute instances over stdio or Streamable HTTP.
 
+> [!IMPORTANT]
+> MaxCompute Remote MCP Server is the recommended way to use MaxCompute MCP.
+> Start with the hosted Remote MCP service documentation:
+> [MaxCompute MCP service (Remote MCP Server)](https://www.alibabacloud.com/help/en/maxcompute/getting-started/mcmcp-service-remote-mcp-server).
+>
+> This repository continues to host the local MCP server code for self-hosted
+> and development scenarios. During the Remote MCP rollout, public,
+> non-sensitive Remote MCP feedback is tracked through this repository's
+> [Remote MCP issue template](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues/new?template=remote-mcp-service-feedback.md).
+
 ## Features
 
 - **Catalog**: list projects / schemas / tables; get project, schema, table and partition details.
@@ -17,13 +27,51 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Al
 - **Identity & access**: `check_access` combines identity discovery and grant inspection.
 - **Transports**: stdio (default, for IDE integration) and Streamable HTTP (built-in, no `mcp-proxy` needed).
 
-## Requirements
+## Remote MCP Server (Recommended)
+
+Use the hosted MaxCompute Remote MCP Server first unless you specifically need
+a local `stdio` or self-hosted setup. The remote service removes local runtime
+and credential setup from the MCP server process, uses Streamable HTTP, and
+follows the official Alibaba Cloud onboarding flow.
+
+For setup instructions, supported endpoints, OAuth login flow, tool
+capabilities, and safety notes, see:
+
+- [MaxCompute MCP service (Remote MCP Server)](https://www.alibabacloud.com/help/en/maxcompute/getting-started/mcmcp-service-remote-mcp-server)
+
+### Remote MCP feedback
+
+Use this repository's issues for public, non-sensitive Remote MCP feedback:
+
+- [Report Remote MCP feedback](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues/new?template=remote-mcp-service-feedback.md)
+- [View existing issues](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues)
+
+Include the MCP client name/version, endpoint type, tool name, request ID,
+time window with timezone, region, sanitized error code/message, expected
+behavior, actual behavior, and reproduction steps when available.
+
+Do not include access tokens, refresh tokens, authorization codes, cookies,
+AccessKey IDs or secrets, OAuth callback URLs with query strings, sensitive SQL,
+customer data, or sensitive Logview content. Use official Alibaba Cloud support
+or security channels for account-specific permissions, billing, SLA-bound
+incidents, production outages, vulnerabilities, or confidential data cases.
+
+## Local MCP Server (Optional)
+
+The sections below describe the local MCP server in this repository. Use the
+local server when you need self-hosting, stdio integration, local development,
+or direct credential control. For the hosted service, follow the Remote MCP
+documentation above instead.
+
+### Requirements
+
+The local MCP server needs:
 
 - Python 3.10 or newer.
 - [`uv`](https://docs.astral.sh/uv/) for dependency management (recommended).
 - MaxCompute access with an Access Key / STS credentials / credentials URI.
 
-## Installation (source checkout)
+### Installation
 
 This first public release is distributed as a source repository only. PyPI and standalone tarballs are not available in this phase.
 
@@ -39,7 +87,7 @@ Verify the entry point:
 uv run alibabacloud-maxcompute-mcp-server --help
 ```
 
-## Configuration
+### Configuration
 
 Copy the public example and fill in real values locally:
 
@@ -50,7 +98,7 @@ cp config.example.json config.json
 
 `config.json` is git-ignored by default and must not be committed.
 
-### Configuration fields
+#### Configuration fields
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -61,14 +109,14 @@ cp config.example.json config.json
 | `maxcompute.protocol` | optional | `https` (default) or `http`. |
 | `maxcompute.accessKeyId` / `accessKeySecret` | optional | Static credentials for development. Prefer `ALIBABA_CLOUD_CREDENTIALS_URI` in production. |
 
-### Credential precedence
+#### Credential precedence
 
 1. `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` environment variables (optionally with `ALIBABA_CLOUD_SECURITY_TOKEN`).
 2. `ALIBABA_CLOUD_CREDENTIALS_URI` pointing to a local credential provider.
 3. The Alibaba Cloud default credential chain (environment, file, ECS RAM role, etc.).
 4. Static `accessKeyId` / `accessKeySecret` inside `config.json` (lowest priority, development only).
 
-### Environment-variable-only mode
+#### Environment-variable-only mode
 
 You can skip the JSON file entirely and configure the server through environment variables:
 
@@ -82,7 +130,7 @@ You can skip the JSON file entirely and configure the server through environment
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | Optional STS token. |
 | `ALIBABA_CLOUD_CREDENTIALS_URI` | Credential provider URI. |
 
-### Named configs (runtime switching)
+#### Named configs (runtime switching)
 
 To switch between regions, endpoints, projects, or identities without restarting the MCP server, create a local multi-config file such as `config.multi.json` and point `MAXCOMPUTE_CATALOG_CONFIG` to it:
 
@@ -131,21 +179,21 @@ Each named config must provide `maxcompute_endpoint`. If `catalogapi_endpoint` i
 
 The active config is process-global. Runtime switching is best suited to stdio / single-client usage. In shared Streamable HTTP mode, all connected clients share the same active config, so a `use_config` call from one client affects the others.
 
-## Running
+### Running
 
-### stdio (default)
+#### stdio (default)
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server
 ```
 
-### Streamable HTTP
+#### Streamable HTTP
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --port 8000
 ```
 
-## MCP tools
+### MCP tools
 
 All tools return JSON in an MCP text response. Check `success` first, then read `data`, `summary`, or `error`.
 
@@ -164,9 +212,9 @@ Notes:
 - `search_meta_data` requires `namespaceId` / `MAXCOMPUTE_NAMESPACE_ID`.
 - Large query results can be streamed to a local `file://` `output_uri`; otherwise responses are returned inline and may be truncated.
 
-## MCP client setup
+### MCP client setup
 
-### Cursor / Claude Code (stdio, config file)
+#### Cursor / Claude Code (stdio, config file)
 
 ```json
 {
@@ -187,7 +235,7 @@ Notes:
 }
 ```
 
-### Cursor / Claude Code (stdio, environment variables only)
+#### Cursor / Claude Code (stdio, environment variables only)
 
 ```json
 {
@@ -212,11 +260,11 @@ Notes:
 }
 ```
 
-### Streamable HTTP
+#### Streamable HTTP
 
 Start the server (see above), then point your MCP client at `http://127.0.0.1:8000/mcp`.
 
-## Development
+### Development
 
 ```bash
 uv sync --all-extras
@@ -224,7 +272,7 @@ uv run pytest tests/ -q
 uv build
 ```
 
-### Package naming
+#### Package naming
 
 | Name | Context |
 | --- | --- |
@@ -236,7 +284,9 @@ The import module name predates the public package name and is kept for backward
 ## Contributing
 
 - This is the first public source release. PyPI packages and GitHub Release artifacts are **not** available in this phase.
-- Pull requests and issues are welcome. Please open an issue before starting large changes.
+- Pull requests and issues are welcome. For Remote MCP service feedback, use
+  the Remote MCP issue template. For local server code changes, please open an
+  issue before starting large changes.
 
 ## License
 
