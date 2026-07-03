@@ -9,7 +9,7 @@
 
 > [!IMPORTANT]
 > 推荐优先使用 MaxCompute Remote MCP Server。请先阅读托管版 Remote MCP
-> 服务文档：[MaxCompute MCP 服务（Remote MCP Server）](https://www.alibabacloud.com/help/zh/maxcompute/getting-started/mcmcp-service-remote-mcp-server)。
+> 服务文档：[MaxCompute MCP 服务使用文档](https://help.aliyun.com/zh/maxcompute/getting-started/mcp-overview-and-access)。
 >
 > 本仓库继续保留 local MCP server 代码，适用于自托管、开发调试和特殊本地
 > stdio 场景。Remote MCP 推进期间，公开且不含敏感信息的反馈可以通过本仓库的
@@ -34,7 +34,7 @@ MaxCompute Remote MCP Server。Remote MCP 服务减少本地运行环境和 MCP
 
 接入步骤、支持地域、OAuth 登录流程、工具能力和安全注意事项见：
 
-- [MaxCompute MCP 服务（Remote MCP Server）](https://www.alibabacloud.com/help/zh/maxcompute/getting-started/mcmcp-service-remote-mcp-server)
+- [MaxCompute MCP 服务使用文档](https://help.aliyun.com/zh/maxcompute/getting-started/mcp-overview-and-access)
 
 ### Remote MCP 反馈
 

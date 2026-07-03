@@ -10,7 +10,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Al
 > [!IMPORTANT]
 > MaxCompute Remote MCP Server is the recommended way to use MaxCompute MCP.
 > Start with the hosted Remote MCP service documentation:
-> [MaxCompute MCP service (Remote MCP Server)](https://www.alibabacloud.com/help/en/maxcompute/getting-started/mcmcp-service-remote-mcp-server).
+> [MaxCompute MCP documentation](https://help.aliyun.com/en/maxcompute/getting-started/mcp-overview-and-access).
 >
 > This repository continues to host the local MCP server code for self-hosted
 > and development scenarios. During the Remote MCP rollout, public,
@@ -37,7 +37,7 @@ follows the official Alibaba Cloud onboarding flow.
 For setup instructions, supported endpoints, OAuth login flow, tool
 capabilities, and safety notes, see:
 
-- [MaxCompute MCP service (Remote MCP Server)](https://www.alibabacloud.com/help/en/maxcompute/getting-started/mcmcp-service-remote-mcp-server)
+- [MaxCompute MCP documentation](https://help.aliyun.com/en/maxcompute/getting-started/mcp-overview-and-access)
 
 ### Remote MCP feedback
 
