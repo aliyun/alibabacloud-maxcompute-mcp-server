@@ -36,7 +36,7 @@ dependencies = [
   "maxcompute_tea_openapi",
   "maxcompute_tea_util",
   "pyodps>=0.12.5.1",  # MaxCompute compute engine: execute SQL, partitions, instances, etc.
-  "mcp>=1.0.0",        # Official MCP Python SDK (stdio + Streamable HTTP transport)
+  "mcp>=1.28.1",        # Official MCP Python SDK (stdio + Streamable HTTP transport)
   "uvicorn>=0.20.0",   # ASGI server for Streamable HTTP mode
 ]
 
