@@ -48,7 +48,7 @@ tag. In particular, the repository's `v0.1.3` tag declares package version
    uv run pytest tests/ -q
    uv run coverage json -o coverage.json
    uv run python scripts/check_coverage.py coverage.json \
-     --line-fail-under 90 --branch-fail-under 80
+     --line-fail-under 80 --branch-fail-under 90
    uv run ruff check maxcompute_catalog_mcp tests scripts
    uv run ruff format --check maxcompute_catalog_mcp tests scripts
    uv run mypy maxcompute_catalog_mcp

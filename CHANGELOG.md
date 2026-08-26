@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `>=23.0.1,<26` to close `GHSA-rgxp-2hwp-jwgg`.
 - CI now blocks Ruff, formatting, mypy, lockfile drift, dependency audit,
   high-severity dependency changes, workflow security findings, line coverage
-  below 90%, and branch coverage below 80%.
+  below 80%, and branch coverage below 90%.
 - A pushed release tag now publishes to PyPI and then creates a GitHub Release
   from this changelog section, matching the `maxcompute-semantic` release flow.
 

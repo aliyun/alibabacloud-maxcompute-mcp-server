@@ -121,9 +121,9 @@ omit = [
 ]
 
 [tool.coverage.report]
-# Coverage threshold (pytest exits non-zero if below this value)
-# Current actual coverage is 97%, leaving 7% buffer to avoid occasional fluctuations
-fail_under = 90
+# Coarse aggregate floor for direct pytest runs. CI separately enforces the exact
+# 80% line and 90% branch thresholds through scripts/check_coverage.py.
+fail_under = 80
 show_missing = true
 skip_empty = true
 exclude_lines = [
