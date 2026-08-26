@@ -335,6 +335,14 @@ fragment. The proxy rejects redirects, ignores ambient HTTP proxy variables,
 and renews the short-lived bearer through CatalogAPI single-flight. The
 CatalogAPI operation has no business body; scope and TTL are server-owned.
 
+When CatalogAPI or the Gateway provides a Request ID, remote-mode failures
+surface that correlation value without exposing credentials: startup failures
+include it in the stderr diagnostic, JSON-RPC errors include
+`error.data.request_id`, and `isError: true` tool results without an existing
+`structuredContent.request_id` include
+`_meta["com.aliyun.maxcompute/requestId"]`. HTTP failures are logged to stderr
+with status and Request ID. Successful MCP response bodies are unchanged.
+
 ### Running
 
 #### Force local mode, stdio

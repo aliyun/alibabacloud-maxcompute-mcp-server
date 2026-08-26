@@ -17,6 +17,7 @@ from .remote_auth import (
     CatalogAccessTokenProvider,
     CatalogMCPAccessTokenClient,
 )
+from .request_ids import request_id_from_exception, sanitize_request_id
 from .runtime_config import (
     RemoteRuntimeConfig,
     RuntimeConfig,
@@ -35,6 +36,12 @@ _LOGGER = logging.getLogger(__name__)
 
 class RemoteInitializationError(RuntimeError):
     """Remote token issuance or MCP initialize failed before selection."""
+
+    def __init__(self, message: str, request_id: str | None = None) -> None:
+        self.request_id = sanitize_request_id(request_id)
+        if self.request_id is not None:
+            message = f"{message} (request_id={self.request_id})"
+        super().__init__(message)
 
 
 class LocalDependenciesMissingError(RuntimeError):
@@ -316,14 +323,18 @@ async def _initialize_remote_mcp(
 
     try:
         await token_provider.get_access_token()
-    except Exception:  # noqa: BLE001 -- normalize SDK and transport failures.
+    except Exception as error:  # noqa: BLE001 -- normalize SDK failures.
         raise RemoteInitializationError(
-            "Remote MCP token issuance failed during initialization"
+            "Remote MCP token issuance failed during initialization",
+            request_id_from_exception(error),
         ) from None
     try:
         await _probe_remote_mcp(config, token_provider)
-    except Exception:  # noqa: BLE001 -- normalize remote transport failures.
-        raise RemoteInitializationError("Remote MCP initialization failed") from None
+    except Exception as error:  # noqa: BLE001 -- normalize transport failures.
+        raise RemoteInitializationError(
+            "Remote MCP initialization failed",
+            request_id_from_exception(error),
+        ) from None
 
 
 async def _run_forced_remote_stdio(
@@ -351,10 +362,19 @@ async def _run_default_stdio(
             )
             await _initialize_remote_mcp(remote, token_provider)
         except Exception as error:  # noqa: BLE001 -- default mode must fall back.
-            _LOGGER.warning(
-                "Remote MCP initialization failed; falling back to local mode (%s)",
-                type(error).__name__,
-            )
+            request_id = request_id_from_exception(error)
+            if request_id is None:
+                _LOGGER.warning(
+                    "Remote MCP initialization failed; falling back to local mode (%s)",
+                    type(error).__name__,
+                )
+            else:
+                _LOGGER.warning(
+                    "Remote MCP initialization failed; falling back to local mode "
+                    "(%s, request_id=%s)",
+                    type(error).__name__,
+                    request_id,
+                )
         else:
             await _run_remote_proxy(remote, token_provider)
             return

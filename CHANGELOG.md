@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Remote proxy failures now preserve safe CatalogAPI and Gateway Request IDs in
+  stderr diagnostics and MCP error metadata while leaving successful responses
+  unchanged.
+
 ### Fixed
 
 - Local SDK mode now requests the public CatalogAPI project view required by

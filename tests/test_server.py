@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from maxcompute_catalog_mcp.config import MaxComputeCatalogConfig
+from maxcompute_catalog_mcp.remote_auth import CatalogTokenRequestError
+from maxcompute_catalog_mcp.remote_proxy import RemoteMCPInitializationFailure
 from maxcompute_catalog_mcp.runtime_config import (
     RemoteRuntimeConfig,
     RuntimeConfig,
@@ -299,6 +301,39 @@ class TestDefaultMode:
         remote_mock.assert_not_awaited()
         local_mock.assert_awaited_once_with(local_tools)
 
+    def test_default_fallback_logs_remote_request_id(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Default mode keeps the gateway correlation ID in its fallback log."""
+
+        provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
+        local_tools = MagicMock()
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+                side_effect=RemoteMCPInitializationFailure("gateway-initialize-403"),
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+                return_value=local_tools,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._run_stdio",
+                new_callable=AsyncMock,
+            ),
+        ):
+            asyncio.run(_run_default_stdio(self._runtime(), None))
+
+        assert "falling back to local mode" in caplog.text
+        assert "request_id=gateway-initialize-403" in caplog.text
+
     def test_token_refresh_after_initialization_does_not_probe_again(self) -> None:
         runtime = self._runtime()
         provider = MagicMock()
@@ -411,6 +446,42 @@ def test_token_failure_does_not_probe_remote_endpoint() -> None:
         asyncio.run(_initialize_remote_mcp(config, provider))
 
     probe_mock.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("stage", "request_id"),
+    [
+        ("token", "catalog-token-403"),
+        ("initialize", "gateway-initialize-401"),
+    ],
+)
+def test_remote_initialization_preserves_request_id_from_each_failure_stage(
+    stage: str,
+    request_id: str,
+) -> None:
+    """Forced remote errors retain CatalogAPI and gateway correlation IDs."""
+
+    config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
+    provider = MagicMock()
+    provider.get_access_token = AsyncMock(return_value="catalog-token")
+    probe_side_effect: Exception | None = None
+    if stage == "token":
+        provider.get_access_token.side_effect = CatalogTokenRequestError(request_id)
+    else:
+        probe_side_effect = RemoteMCPInitializationFailure(request_id)
+
+    with (
+        patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+            side_effect=probe_side_effect,
+        ),
+        pytest.raises(RemoteInitializationError) as exc_info,
+    ):
+        asyncio.run(_initialize_remote_mcp(config, provider))
+
+    assert exc_info.value.request_id == request_id
+    assert f"request_id={request_id}" in str(exc_info.value)
 
 
 @patch("maxcompute_catalog_mcp.server.build_catalog_client_set")

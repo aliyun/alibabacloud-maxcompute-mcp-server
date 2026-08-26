@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -18,16 +19,20 @@ from mcp.shared.message import ClientMessageMetadata, SessionMessage
 from maxcompute_catalog_mcp.remote_proxy import (
     DynamicBearerAuth,
     ProtocolMetadataBridge,
+    RemoteMCPInitializationFailure,
+    RemoteRequestIdTracker,
     _run_remote_proxy_with_provider,
     probe_remote_mcp,
     relay_client_messages,
     relay_server_messages,
 )
+from maxcompute_catalog_mcp.request_ids import sanitize_request_id
 from maxcompute_catalog_mcp.runtime_config import RemoteRuntimeConfig
 
 MODERN_PROTOCOL_VERSION = "2026-07-28"
 LEGACY_PROTOCOL_VERSION = "2025-06-18"
 PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
+REQUEST_ID_META_KEY = "com.aliyun.maxcompute/requestId"
 
 
 @dataclass
@@ -121,11 +126,15 @@ def test_remote_proxy_uses_exact_hardened_http_client_and_relay_wiring() -> None
         assert kwargs["auth"]._provider is provider
         assert kwargs["follow_redirects"] is False
         assert kwargs["trust_env"] is False
+        response_hooks = kwargs["event_hooks"]["response"]
+        assert len(response_hooks) == 1
+        assert isinstance(response_hooks[0].__self__, RemoteRequestIdTracker)
         relay_mock.assert_awaited_once_with(
             local_read,
             local_write,
             remote_read,
             remote_write,
+            response_hooks[0].__self__,
         )
 
     asyncio.run(scenario())
@@ -164,7 +173,10 @@ def test_remote_probe_requires_authenticated_mcp_initialize() -> None:
             assert payload["method"] == "notifications/initialized"
             return httpx.Response(202)
 
+        observed_hooks: list[object] = []
+
         def client_factory(**kwargs):
+            observed_hooks.extend(kwargs["event_hooks"]["response"])
             return real_async_client(
                 transport=httpx.MockTransport(handler),
                 **kwargs,
@@ -183,6 +195,383 @@ def test_remote_probe_requires_authenticated_mcp_initialize() -> None:
             ("initialize", "Bearer gateway-token-1"),
             ("notifications/initialized", "Bearer gateway-token-2"),
         ]
+        assert len(observed_hooks) == 1
+        assert isinstance(observed_hooks[0].__self__, RemoteRequestIdTracker)
+
+    asyncio.run(scenario())
+
+
+def test_remote_probe_failure_surfaces_sanitized_request_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Forced remote startup exposes the gateway correlation ID, not credentials."""
+
+    async def scenario() -> None:
+        real_async_client = httpx.AsyncClient
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            assert request.headers["Authorization"] == "Bearer gateway-token-1"
+            return httpx.Response(
+                401,
+                headers={
+                    "content-type": "application/json",
+                    "x-request-id": "gateway-request-401",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {"code": -32001, "message": "unauthorized"},
+                },
+            )
+
+        def client_factory(**kwargs):
+            return real_async_client(
+                transport=httpx.MockTransport(handler),
+                **kwargs,
+            )
+
+        with (
+            patch(
+                "maxcompute_catalog_mcp.remote_proxy.httpx.AsyncClient",
+                side_effect=client_factory,
+            ),
+            pytest.raises(
+                RemoteMCPInitializationFailure,
+                match="gateway-request-401",
+            ) as exc_info,
+        ):
+            await probe_remote_mcp(
+                RemoteRuntimeConfig(url="https://gateway.example.com/mcp"),
+                RotatingTokenProvider(),
+            )
+
+        assert exc_info.value.request_id == "gateway-request-401"
+
+    caplog.set_level(logging.DEBUG)
+    asyncio.run(scenario())
+
+    assert "status=401" in caplog.text
+    assert "request_id=gateway-request-401" in caplog.text
+    assert "gateway-token-1" not in caplog.text
+    assert "Authorization" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        " ",
+        "request\nid",
+        "request\x00id",
+        "请求-id",
+        "r" * 257,
+        42,
+        "None",
+    ],
+)
+def test_request_id_sanitizer_rejects_untrusted_values(value: object) -> None:
+    """Untrusted response metadata cannot inject logs or oversized errors."""
+
+    assert sanitize_request_id(value) is None
+
+
+def test_request_id_tracker_logs_success_only_at_debug(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Successful request IDs remain available for diagnostics without warning."""
+
+    async def scenario() -> None:
+        tracker = RemoteRequestIdTracker()
+        request = httpx.Request(
+            "POST",
+            "https://gateway.example.com/mcp",
+            json={"jsonrpc": "2.0", "id": 7, "method": "tools/list"},
+        )
+        await tracker.observe_response(
+            httpx.Response(
+                200,
+                headers={"x-request-id": "gateway-request-200"},
+                request=request,
+            )
+        )
+
+        assert tracker.pop(7) == "gateway-request-200"
+
+    caplog.set_level(logging.DEBUG)
+    asyncio.run(scenario())
+
+    assert "DEBUG" in caplog.text
+    assert "status=200" in caplog.text
+    assert "request_id=gateway-request-200" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("method", "content"),
+    [
+        ("GET", b""),
+        ("POST", b"not-json"),
+        ("POST", b"[]"),
+        ("POST", b'{"jsonrpc":"2.0","id":true,"method":"tools/list"}'),
+    ],
+)
+def test_request_id_tracker_ignores_uncorrelatable_http_responses(
+    method: str,
+    content: bytes,
+) -> None:
+    """Non-request traffic is logged but never assigned to a JSON-RPC response."""
+
+    async def scenario() -> None:
+        tracker = RemoteRequestIdTracker()
+        request = httpx.Request(
+            method,
+            "https://gateway.example.com/mcp",
+            content=content,
+        )
+        await tracker.observe_response(
+            httpx.Response(
+                200,
+                headers={"x-request-id": "gateway-uncorrelated"},
+                request=request,
+            )
+        )
+
+        assert tracker.latest_request_id == "gateway-uncorrelated"
+        assert tracker.pop(True) is None
+        assert tracker.pop(None) is None
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("original_data", "expected_data"),
+    [
+        (None, {"request_id": "gateway-error-1"}),
+        (
+            {"reason": "denied"},
+            {"reason": "denied", "request_id": "gateway-error-1"},
+        ),
+        (
+            "provider detail",
+            {"details": "provider detail", "request_id": "gateway-error-1"},
+        ),
+        (
+            {"request_id": "backend-request"},
+            {"request_id": "backend-request"},
+        ),
+    ],
+)
+def test_jsonrpc_errors_include_correlated_gateway_request_id(
+    original_data: object,
+    expected_data: dict[str, object],
+) -> None:
+    """Every JSON-RPC error carries the matching HTTP request ID when available."""
+
+    async def scenario() -> None:
+        tracker = RemoteRequestIdTracker()
+        for request_id, gateway_request_id in (
+            (1, "gateway-error-1"),
+            ("1", "gateway-error-string-1"),
+        ):
+            request = httpx.Request(
+                "POST",
+                "https://gateway.example.com/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                },
+            )
+            await tracker.observe_response(
+                httpx.Response(
+                    400,
+                    headers={"x-request-id": gateway_request_id},
+                    request=request,
+                )
+            )
+
+        bridge = ProtocolMetadataBridge(tracker)
+        string_id_error = SessionMessage(
+            mcp_types.JSONRPCError(
+                jsonrpc="2.0",
+                id="1",
+                error=mcp_types.ErrorData(
+                    code=-32600,
+                    message="invalid request",
+                ),
+            )
+        )
+        bridge.observe_inbound(string_id_error)
+        assert string_id_error.message.error.data == {
+            "request_id": "gateway-error-string-1"
+        }
+
+        error = SessionMessage(
+            mcp_types.JSONRPCError(
+                jsonrpc="2.0",
+                id=1,
+                error=mcp_types.ErrorData(
+                    code=-32600,
+                    message="invalid request",
+                    data=original_data,
+                ),
+            )
+        )
+
+        assert bridge.observe_inbound(error) is error
+        assert error.message.error.data == expected_data
+        assert tracker.pop(1) is None
+
+    asyncio.run(scenario())
+
+
+def test_tool_errors_use_result_metadata_without_overwriting_existing_ids() -> None:
+    """Tool error results expose transport IDs unless the tool already supplied one."""
+
+    async def scenario() -> None:
+        tracker = RemoteRequestIdTracker()
+        for request_id in (2, 3, 4, 5):
+            request = httpx.Request(
+                "POST",
+                "https://gateway.example.com/mcp",
+                json={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                },
+            )
+            await tracker.observe_response(
+                httpx.Response(
+                    200,
+                    headers={"x-request-id": f"gateway-tool-{request_id}"},
+                    request=request,
+                )
+            )
+
+        bridge = ProtocolMetadataBridge(tracker)
+        without_body_id = SessionMessage(
+            mcp_types.JSONRPCResponse(
+                jsonrpc="2.0",
+                id=2,
+                result={
+                    "content": [{"type": "text", "text": "failed"}],
+                    "isError": True,
+                },
+            )
+        )
+        with_body_id = SessionMessage(
+            mcp_types.JSONRPCResponse(
+                jsonrpc="2.0",
+                id=3,
+                result={
+                    "content": [{"type": "text", "text": "failed"}],
+                    "structuredContent": {"request_id": "backend-tool-request"},
+                    "isError": True,
+                },
+            )
+        )
+        with_metadata = SessionMessage(
+            mcp_types.JSONRPCResponse(
+                jsonrpc="2.0",
+                id=4,
+                result={
+                    "_meta": {"existing": "metadata"},
+                    "content": [{"type": "text", "text": "failed"}],
+                    "isError": True,
+                },
+            )
+        )
+        with_transport_id = SessionMessage(
+            mcp_types.JSONRPCResponse(
+                jsonrpc="2.0",
+                id=5,
+                result={
+                    "_meta": {REQUEST_ID_META_KEY: "original-transport-request"},
+                    "content": [{"type": "text", "text": "failed"}],
+                    "isError": True,
+                },
+            )
+        )
+
+        bridge.observe_inbound(without_body_id)
+        bridge.observe_inbound(with_body_id)
+        bridge.observe_inbound(with_metadata)
+        bridge.observe_inbound(with_transport_id)
+
+        assert without_body_id.message.result["_meta"] == {
+            REQUEST_ID_META_KEY: "gateway-tool-2"
+        }
+        assert "_meta" not in with_body_id.message.result
+        assert with_body_id.message.result["structuredContent"] == {
+            "request_id": "backend-tool-request"
+        }
+        assert with_metadata.message.result["_meta"] == {
+            "existing": "metadata",
+            REQUEST_ID_META_KEY: "gateway-tool-4",
+        }
+        assert with_transport_id.message.result["_meta"] == {
+            REQUEST_ID_META_KEY: "original-transport-request"
+        }
+
+    asyncio.run(scenario())
+
+
+def test_success_and_headerless_responses_remain_unchanged() -> None:
+    """The proxy adds metadata only to failures with a usable correlation ID."""
+
+    async def scenario() -> None:
+        tracker = RemoteRequestIdTracker()
+        success_request = httpx.Request(
+            "POST",
+            "https://gateway.example.com/mcp",
+            json={"jsonrpc": "2.0", "id": 4, "method": "tools/call"},
+        )
+        await tracker.observe_response(
+            httpx.Response(
+                200,
+                headers={"x-request-id": "gateway-success-4"},
+                request=success_request,
+            )
+        )
+        headerless_request = httpx.Request(
+            "POST",
+            "https://gateway.example.com/mcp",
+            json={"jsonrpc": "2.0", "id": 5, "method": "tools/call"},
+        )
+        await tracker.observe_response(httpx.Response(500, request=headerless_request))
+        bridge = ProtocolMetadataBridge(tracker)
+        success_result = {
+            "content": [{"type": "text", "text": "ok"}],
+            "isError": False,
+        }
+        success = SessionMessage(
+            mcp_types.JSONRPCResponse(
+                jsonrpc="2.0",
+                id=4,
+                result=success_result.copy(),
+            )
+        )
+        headerless_error = SessionMessage(
+            mcp_types.JSONRPCError(
+                jsonrpc="2.0",
+                id=5,
+                error=mcp_types.ErrorData(code=-32603, message="failed"),
+            )
+        )
+
+        bridge.observe_inbound(success)
+        bridge.observe_inbound(headerless_error)
+        notification = SessionMessage(
+            mcp_types.JSONRPCNotification(
+                jsonrpc="2.0",
+                method="notifications/progress",
+            )
+        )
+        assert bridge.observe_inbound(notification) is notification
+
+        assert success.message.result == success_result
+        assert headerless_error.message.error.data is None
+        assert tracker.pop(4) is None
 
     asyncio.run(scenario())
 
@@ -411,12 +800,17 @@ def test_streamable_http_400_jsonrpc_error_returns_without_timeout() -> None:
     async def scenario() -> None:
         from mcp.client.streamable_http import streamable_http_client
 
+        request_ids = RemoteRequestIdTracker()
+
         async def handler(request: httpx.Request) -> httpx.Response:
             assert request.headers["mcp-protocol-version"] == MODERN_PROTOCOL_VERSION
             assert request.headers["mcp-method"] == "server/discover"
             return httpx.Response(
                 400,
-                headers={"content-type": "application/json"},
+                headers={
+                    "content-type": "application/json",
+                    "x-request-id": "gateway-invalid-request-1",
+                },
                 json={
                     "jsonrpc": "2.0",
                     "id": 1,
@@ -427,6 +821,7 @@ def test_streamable_http_400_jsonrpc_error_returns_without_timeout() -> None:
         async with (
             httpx.AsyncClient(
                 transport=httpx.MockTransport(handler),
+                event_hooks={"response": [request_ids.observe_response]},
                 follow_redirects=False,
                 trust_env=False,
             ) as client,
@@ -445,14 +840,17 @@ def test_streamable_http_400_jsonrpc_error_returns_without_timeout() -> None:
                     }
                 },
             )
-            await write_stream.send(
-                ProtocolMetadataBridge().prepare_outbound(SessionMessage(request))
-            )
+            bridge = ProtocolMetadataBridge(request_ids)
+            await write_stream.send(bridge.prepare_outbound(SessionMessage(request)))
             with anyio.fail_after(1):
                 received = await read_stream.receive()
+            bridge.observe_inbound(received)
 
             assert isinstance(received.message, mcp_types.JSONRPCError)
             assert received.message.id == 1
             assert received.message.error.code == -32600
+            assert received.message.error.data == {
+                "request_id": "gateway-invalid-request-1"
+            }
 
     asyncio.run(scenario())
