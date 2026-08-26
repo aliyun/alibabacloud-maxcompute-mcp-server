@@ -1,9 +1,11 @@
 # 阿里云 MaxCompute MCP Server
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/downloads/)
-
-[English](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/README.md)
+[![PyPI](https://img.shields.io/pypi/v/alibabacloud-maxcompute-mcp-server)](https://pypi.org/project/alibabacloud-maxcompute-mcp-server/)
+[![Python](https://img.shields.io/pypi/pyversions/alibabacloud-maxcompute-mcp-server)](https://pypi.org/project/alibabacloud-maxcompute-mcp-server/)
+[![License](https://img.shields.io/github/license/aliyun/alibabacloud-maxcompute-mcp-server)](LICENSE)
+[![CI](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/actions/workflows/ci.yml)
+[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+[![中文](https://img.shields.io/badge/lang-中文-red)](README_ZH.md)
 
 阿里云 [MaxCompute](https://www.aliyun.com/product/odps) 的本地 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 启动器。它既可以用 `local` 模式运行原有 SDK 实现，也可以用 `remote` 模式作为托管版 MaxCompute MCP 服务的透明 stdio 代理。
 

@@ -1,9 +1,11 @@
 # Alibaba Cloud MaxCompute MCP Server
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/downloads/)
-
-[中文文档](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/README_ZH.md)
+[![PyPI](https://img.shields.io/pypi/v/alibabacloud-maxcompute-mcp-server)](https://pypi.org/project/alibabacloud-maxcompute-mcp-server/)
+[![Python](https://img.shields.io/pypi/pyversions/alibabacloud-maxcompute-mcp-server)](https://pypi.org/project/alibabacloud-maxcompute-mcp-server/)
+[![License](https://img.shields.io/github/license/aliyun/alibabacloud-maxcompute-mcp-server)](LICENSE)
+[![CI](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/actions/workflows/ci.yml)
+[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+[![中文](https://img.shields.io/badge/lang-中文-red)](README_ZH.md)
 
 A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launcher for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It can run the original SDK-backed server (`local` mode) or act as a transparent stdio proxy to the hosted MaxCompute MCP service (`remote` mode).
 
