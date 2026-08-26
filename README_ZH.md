@@ -18,7 +18,7 @@
 
 ## 能力概览
 
-- **兼容原有配置**：未配置新字段时，启动器只在存在同网络、已发布的地域 MCP Endpoint 时选择 remote；否则继续原 local SDK 实现。
+- **兼容原有配置**：通过已有 FE/Catalog endpoint 判断 Region 和 public/VPC 网络；简单 `region` + `network` 配置无需 Region 表即可生成 FE、Catalog 和 MCP endpoint。
 - **透明 remote 模式**：将 stdio MCP 消息原样转发到托管版 Streamable HTTP endpoint，不重建或重命名远端工具。
 - **当前协议兼容**：使用 MCP Python SDK 2.x，保留现代 `2026-07-28` 请求的 metadata 与路由 Header，同时兼容 legacy initialize。
 - **标准 CatalogAPI 鉴权**：remote 代理使用现有凭证 Provider 对无 body 的 `mcpAccessToken` 请求签名，续期时重新取得当前 AK/STS/ECS RAM Role 凭证。
@@ -53,9 +53,9 @@ MaxCompute Remote MCP Server。Remote MCP 服务减少本地运行环境和 MCP
 
 为保持老配置升级兼容，启动器默认使用 `default`。它从所选老配置的 FE 和 Catalog
 endpoint 判断 Region 和 public/VPC 网络，也支持显式 `region` + `network` 简单配置。
-存在已发布的匹配 MCP Endpoint 且本进程使用 stdio 时，先通过 CatalogAPI 签发 token，
-并完成经过认证的 MCP `initialize`；成功才选择 remote，token 签发、连接、认证或
-initialize 失败时 fallback 到原有 local 实现。`--mode local` 可以显式固定原实现。
+本进程使用 stdio 且能够确定 Region/网络时，先通过 CatalogAPI 签发 token，再对唯一的
+地域 MCP endpoint 完成经过认证的 `initialize`；token 签发或 remote 初始化失败时
+fallback 到原有 local 实现。`--mode local` 可以显式固定原实现。
 
 | 模式 | MCP 路径 | 后端 | 本进程对外传输 |
 | --- | --- | --- | --- |
@@ -145,8 +145,8 @@ cp config.example.json config.json
 }
 ```
 
-`network: "vpc"` 会生成对应的内网 FE 和 Catalog endpoint。Remote MCP URL 不做
-字符串拼接，`default` 仍只会从下方已发布 registry 中选择。
+`region` 和 `network` 会按规则生成 FE、Catalog 和 MCP endpoint。`network: "vpc"`
+使用内网 FE/Catalog endpoint 和 VPC MCP endpoint。
 
 #### local 模式凭证优先级
 
@@ -233,32 +233,29 @@ Streamable HTTP 模式下，所有客户端共享同一个当前配置，一个�
 #### default 选型与 remote 覆盖
 
 老版本的顶层 `maxcompute`、顶层 `odps`、`configs` 命名配置以及纯环境变量配置都继续
-加载。对于 stdio，`default` 使用以下已发布的严格映射，不按字符串拼接未发布域名：
+加载。Endpoint 通过统一规则生成，不维护 Region 列表：
 
-| MaxCompute 网络 | Region | 自动选择的 MCP Endpoint |
+| 服务 | public 规则 | VPC 规则 |
 | --- | --- | --- |
-| public | `cn-hangzhou` | `https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp` |
-| public | `cn-hongkong` | `https://mcp.cn-hongkong.maxcompute.aliyun.com/mcp` |
-| public | `ap-southeast-1` | `https://mcp.ap-southeast-1.maxcompute.aliyun.com/mcp` |
-| VPC | `cn-hangzhou` | `https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp` |
-| VPC | `cn-hongkong` | `https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp` |
-| VPC | `ap-southeast-1` | `https://mcp.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp` |
+| FE | `https://service.<region>.maxcompute.aliyun.com/api` | `https://service.<region>-intranet.maxcompute.aliyun-inc.com/api` |
+| CatalogAPI | `https://catalogapi.<region>.maxcompute.aliyun.com` | `https://catalogapi.<region>-intranet.maxcompute.aliyun-inc.com` |
+| 中国内地 Region MCP（`cn-*`，不含 `cn-hongkong`） | `https://mcp.<region>.maxcompute.aliyun.com/mcp` | `https://mcp.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
+| 海外 Region MCP（含 `cn-hongkong`） | `https://mcp-intl.<region>.maxcompute.aliyun.com/mcp` | `https://mcp-intl.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
 
 对于老配置，能够识别的 FE 和 Catalog endpoint 都会提供 Region/网络证据：公网
 endpoint 选择公网 MCP，已识别的 VPC/内网 endpoint 选择 VPC MCP。两者都能识别时，
 必须指向相同 Region 和网络；二者冲突时绝不选择 remote。显式 `region`/`network`
 与已识别 endpoint 冲突则视为配置错误。
 
-VPC 配置绝不选择公网 MCP，也不跨 Region。某 Region 没有表内匹配 MCP Endpoint、
-只有自定义/历史 endpoint、FE/Catalog 证据冲突，或进程使用本地 HTTP transport 时，
-`default` 保持原 local 实现；显式 `remote` 模式 fail closed。
+VPC 配置绝不选择公网 MCP，也不跨 Region。只有自定义/历史 endpoint 且无法验证
+Region/网络、FE/Catalog 证据冲突，或进程使用本地 HTTP transport 时，`default` 保持
+原 local 实现；显式 `remote` 模式 fail closed。
 
-`mcp` 与 `mcp-intl` 的站点差异只影响 MCP Client 直连 Remote MCP 时的浏览器 OAuth
-入口。本地 remote 代理使用 AK/STS 签名调用 CatalogAPI，再携带其签发的 `mcpc_`
-token，不走 OAuth；老配置中的 FE、Catalog、Tunnel endpoint 也不包含或区分账号站点。
-因此 `default` 不推断中国站/国际站，只按 Region 和 public/VPC 网络选择表中的稳定默认
-入口。已发布的同网络 `mcp-intl` 地址可通过 `remote.url` 显式覆盖，语义等价；VPC
-仍必须同 Region。
+MCP 域名只按 Region 决定：中国内地 Region（`cn-*`，但不包括 `cn-hongkong`）使用
+`mcp`，`cn-hongkong` 和其他海外 Region 使用 `mcp-intl`。这不是账号站点探测；
+CatalogAPI 签发 token 的链路不进入 RAM OAuth。生成的 endpoint 只在进程启动时完成
+一次认证初始化，之后固定到进程结束；CatalogAPI token 续期不会重新初始化。显式配置
+`remote.url` 时只使用该 URL；VPC 仍必须同 Region。
 
 最小 remote 覆盖 JSON 仍复用原 MaxCompute 配置和凭证：
 
@@ -301,7 +298,7 @@ uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --po
 uv run alibabacloud-maxcompute-mcp-server --config /path/to/config.json
 ```
 
-已知 endpoint 在 `default` 下无需增加站点字段。仅在需要覆盖默认入口时增加
+按规则生成的地域 endpoint 在 `default` 下无需增加站点字段。仅在需要覆盖默认入口时增加
 `--mode remote --remote-url https://<REMOTE_MCP_HOST>/mcp`。
 
 remote 模式会拒绝 `--transport http` 和 `--transport streamable-http`。
@@ -403,7 +400,7 @@ SDK 工具面。local 工具通过 MCP text 响应返回 JSON；调用方应先�
 }
 ```
 
-已发布的同网络 Region endpoint 可以省略 `--mode` 和 `--remote-url`，由 `default`
+按规则生成的同网络 Region endpoint 可以省略 `--mode` 和 `--remote-url`，由 `default`
 探测选择。不要把 AccessKey ID、Secret、STS token 或 bearer token 放在 MCP Client
 args 中。
 

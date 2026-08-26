@@ -19,6 +19,7 @@ from maxcompute_catalog_mcp.runtime_config import (
 from maxcompute_catalog_mcp.server import (
     RemoteInitializationError,
     _build_mcp_server,
+    _initialize_remote_mcp,
     _parse_args,
     _parse_server_options,
     _run_default_stdio,
@@ -149,6 +150,7 @@ def test_main_remote_mode_builds_token_provider_but_not_local_tools(
     )
 
     token_provider = MagicMock()
+    token_provider.get_access_token = AsyncMock(return_value="catalog-token")
     with patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock, \
          patch(
              "maxcompute_catalog_mcp.server.build_remote_token_provider",
@@ -184,6 +186,7 @@ class TestDefaultMode:
 
     def test_successful_remote_initialize_selects_transparent_proxy(self) -> None:
         provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
         with patch(
             "maxcompute_catalog_mcp.server.build_remote_token_provider",
             return_value=provider,
@@ -201,6 +204,7 @@ class TestDefaultMode:
         build_provider_mock.assert_called_once_with("/fake/config.json", "daily")
         probe_mock.assert_awaited_once_with(self._runtime().remote, provider)
         remote_mock.assert_awaited_once_with(self._runtime().remote, provider)
+        provider.get_access_token.assert_awaited_once_with()
         build_tools_mock.assert_not_called()
 
     def test_catalog_token_failure_falls_back_to_original_local_server(
@@ -235,6 +239,7 @@ class TestDefaultMode:
         self,
     ) -> None:
         provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
         local_tools = MagicMock()
         with patch(
             "maxcompute_catalog_mcp.server.build_remote_token_provider",
@@ -243,7 +248,7 @@ class TestDefaultMode:
             "maxcompute_catalog_mcp.server._probe_remote_mcp",
             new_callable=AsyncMock,
             side_effect=RuntimeError("gateway authentication failed"),
-        ), patch(
+        ) as probe_mock, patch(
             "maxcompute_catalog_mcp.server._run_remote_proxy",
             new_callable=AsyncMock,
         ) as remote_mock, patch(
@@ -255,13 +260,47 @@ class TestDefaultMode:
         ) as local_mock:
             asyncio.run(_run_default_stdio(self._runtime(), None))
 
+        probe_mock.assert_awaited_once_with(self._runtime().remote, provider)
         remote_mock.assert_not_awaited()
         local_mock.assert_awaited_once_with(local_tools)
+
+    def test_token_refresh_after_initialization_does_not_probe_again(self) -> None:
+        runtime = self._runtime()
+        provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
+
+        async def simulate_runtime_refresh(
+            selected: RemoteRuntimeConfig,
+            selected_provider: MagicMock,
+        ) -> None:
+            assert selected is runtime.remote
+            await selected_provider.get_access_token()
+            await selected_provider.get_access_token()
+
+        with patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=provider,
+        ), patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+        ) as probe_mock, patch(
+            "maxcompute_catalog_mcp.server._run_remote_proxy",
+            new_callable=AsyncMock,
+            side_effect=simulate_runtime_refresh,
+        ), patch(
+            "maxcompute_catalog_mcp.server.build_tools",
+        ) as build_tools_mock:
+            asyncio.run(_run_default_stdio(runtime, "/fake/config.json"))
+
+        probe_mock.assert_awaited_once_with(runtime.remote, provider)
+        assert provider.get_access_token.await_count == 3
+        build_tools_mock.assert_not_called()
 
     def test_remote_runtime_failure_after_selection_does_not_fall_back(
         self,
     ) -> None:
         provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
         with patch(
             "maxcompute_catalog_mcp.server.build_remote_token_provider",
             return_value=provider,
@@ -286,6 +325,7 @@ class TestDefaultMode:
 def test_forced_remote_initialize_failure_is_fail_closed() -> None:
     config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
     provider = MagicMock()
+    provider.get_access_token = AsyncMock(return_value="catalog-token")
     with patch(
         "maxcompute_catalog_mcp.server._probe_remote_mcp",
         new_callable=AsyncMock,
@@ -295,11 +335,29 @@ def test_forced_remote_initialize_failure_is_fail_closed() -> None:
         new_callable=AsyncMock,
     ) as remote_mock, pytest.raises(
         RemoteInitializationError,
-        match="failed in remote mode",
+        match="initialization failed",
     ):
         asyncio.run(_run_forced_remote_stdio(config, provider))
 
     remote_mock.assert_not_awaited()
+
+
+def test_token_failure_does_not_probe_remote_endpoint() -> None:
+    config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
+    provider = MagicMock()
+    provider.get_access_token = AsyncMock(
+        side_effect=RuntimeError("token issuance failed")
+    )
+    with patch(
+        "maxcompute_catalog_mcp.server._probe_remote_mcp",
+        new_callable=AsyncMock,
+    ) as probe_mock, pytest.raises(
+        RemoteInitializationError,
+        match="token issuance failed",
+    ):
+        asyncio.run(_initialize_remote_mcp(config, provider))
+
+    probe_mock.assert_not_awaited()
 
 
 @patch("maxcompute_catalog_mcp.server.build_client_set")

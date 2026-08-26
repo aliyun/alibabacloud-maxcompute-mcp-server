@@ -27,10 +27,10 @@ def _legacy_config(endpoint: str, **extra: object) -> dict[str, object]:
     return {"maxcompute": maxcompute}
 
 
-def test_legacy_public_config_automatically_uses_published_regional_mcp(
+def test_legacy_public_config_automatically_derives_regional_mcp(
     tmp_path: Path,
 ) -> None:
-    """An old config needs no new fields to use a published public MCP."""
+    """An old config needs no new fields to derive public MCP endpoints."""
     path = _write_config(
         tmp_path,
         _legacy_config(
@@ -125,7 +125,7 @@ def test_legacy_catalog_endpoint_can_supply_network_when_fe_is_custom(
     assert config.mode is RuntimeMode.DEFAULT
     assert config.remote is not None
     assert config.remote.url == (
-        "https://mcp.ap-southeast-1.maxcompute.aliyun.com/mcp"
+        "https://mcp-intl.ap-southeast-1.maxcompute.aliyun.com/mcp"
     )
 
 
@@ -147,7 +147,7 @@ def test_legacy_vpc_catalog_endpoint_can_supply_network_when_fe_is_custom(
     assert config.mode is RuntimeMode.DEFAULT
     assert config.remote is not None
     assert config.remote.url == (
-        "https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp"
+        "https://mcp-intl.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp"
     )
 
 
@@ -224,6 +224,64 @@ def test_simple_region_network_config_selects_matching_mcp(
     assert config.remote.url == expected_url
 
 
+@pytest.mark.parametrize(
+    ("endpoint", "expected_url"),
+    [
+        (
+            "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+            "https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp",
+        ),
+        (
+            "https://service.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/api",
+            "https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp",
+        ),
+        (
+            "https://service.cn-hongkong.maxcompute.aliyun.com/api",
+            "https://mcp-intl.cn-hongkong.maxcompute.aliyun.com/mcp",
+        ),
+        (
+            "https://service.cn-hongkong-vpc.maxcompute.aliyun-inc.com/api",
+            "https://mcp-intl.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp",
+        ),
+        (
+            "https://service.ap-southeast-1.maxcompute.aliyun.com/api",
+            "https://mcp-intl.ap-southeast-1.maxcompute.aliyun.com/mcp",
+        ),
+        (
+            "https://service.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/api",
+            "https://mcp-intl.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp",
+        ),
+        (
+            "https://service.cn-beijing.maxcompute.aliyun.com/api",
+            "https://mcp.cn-beijing.maxcompute.aliyun.com/mcp",
+        ),
+        (
+            "https://service.ap-northeast-1.maxcompute.aliyun.com/api",
+            "https://mcp-intl.ap-northeast-1.maxcompute.aliyun.com/mcp",
+        ),
+        (
+            "https://service.eu-central-1-vpc.maxcompute.aliyun-inc.com/api",
+            "https://mcp-intl.eu-central-1-vpc.maxcompute.aliyun-inc.com/mcp",
+        ),
+        (
+            "https://service.us-west-1.maxcompute.aliyun.com/api",
+            "https://mcp-intl.us-west-1.maxcompute.aliyun.com/mcp",
+        ),
+    ],
+)
+def test_default_derives_one_mcp_endpoint_for_any_region(
+    tmp_path: Path,
+    endpoint: str,
+    expected_url: str,
+) -> None:
+    path = _write_config(tmp_path, _legacy_config(endpoint))
+
+    config = load_runtime_config(path)
+
+    assert config.remote is not None
+    assert config.remote.url == expected_url
+
+
 def test_explicit_network_must_match_recognized_legacy_endpoints(
     tmp_path: Path,
 ) -> None:
@@ -255,10 +313,10 @@ def test_explicit_region_must_match_recognized_legacy_endpoints(
         load_runtime_config(path)
 
 
-def test_legacy_singapore_vpc_config_uses_published_regional_mcp(
+def test_legacy_singapore_vpc_config_derives_regional_mcp(
     tmp_path: Path,
 ) -> None:
-    """Singapore is a published VPC MCP service Region too."""
+    """An overseas VPC Region derives the international MCP hostname."""
     path = _write_config(
         tmp_path,
         _legacy_config(
@@ -272,7 +330,7 @@ def test_legacy_singapore_vpc_config_uses_published_regional_mcp(
     assert config.mode is RuntimeMode.DEFAULT
     assert config.remote is not None
     assert config.remote.url == (
-        "https://mcp.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp"
+        "https://mcp-intl.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp"
     )
 
 
@@ -309,10 +367,9 @@ def test_catalog_token_remote_accepts_either_oauth_site_entry(
     assert config.remote.url == remote_url
 
 
-def test_default_mode_without_published_regional_mcp_has_no_remote_candidate(
+def test_default_mode_derives_endpoint_without_a_region_registry(
     tmp_path: Path,
 ) -> None:
-    """Default mode falls back locally when no safe remote target exists."""
     document = _legacy_config(
         "https://service.cn-shanghai-vpc.maxcompute.aliyun-inc.com/api",
     )
@@ -324,21 +381,28 @@ def test_default_mode_without_published_regional_mcp_has_no_remote_candidate(
     config = load_runtime_config(path)
 
     assert config.mode is RuntimeMode.DEFAULT
-    assert config.remote is None
+    assert config.remote is not None
+    assert config.remote.url == (
+        "https://mcp.cn-shanghai-vpc.maxcompute.aliyun-inc.com/mcp"
+    )
 
 
-def test_explicit_remote_without_published_endpoint_is_rejected(
+def test_explicit_remote_without_url_derives_regional_endpoint(
     tmp_path: Path,
 ) -> None:
-    """Remote mode never silently changes to the local implementation."""
     document = _legacy_config(
-        "https://service.cn-shanghai-vpc.maxcompute.aliyun-inc.com/api",
+        "https://service.eu-west-1.maxcompute.aliyun.com/api",
     )
     document["mode"] = "remote"
     path = _write_config(tmp_path, document)
 
-    with pytest.raises(ValueError, match="no published remote MCP endpoint"):
-        load_runtime_config(path)
+    config = load_runtime_config(path)
+
+    assert config.mode is RuntimeMode.REMOTE
+    assert config.remote is not None
+    assert config.remote.url == (
+        "https://mcp-intl.eu-west-1.maxcompute.aliyun.com/mcp"
+    )
 
 
 def test_unknown_legacy_endpoint_stays_local_instead_of_guessing(
@@ -428,7 +492,7 @@ def test_named_profile_drives_network_and_region_selection(tmp_path: Path) -> No
     assert config.profile == "vpc"
     assert config.remote is not None
     assert config.remote.url == (
-        "https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp"
+        "https://mcp-intl.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp"
     )
 
 
@@ -451,7 +515,7 @@ def test_environment_only_legacy_config_gets_a_default_remote_candidate(
     assert config.mode is RuntimeMode.DEFAULT
     assert config.remote is not None
     assert config.remote.url == (
-        "https://mcp.ap-southeast-1.maxcompute.aliyun.com/mcp"
+        "https://mcp-intl.ap-southeast-1.maxcompute.aliyun.com/mcp"
     )
 
 
@@ -466,7 +530,7 @@ def test_environment_only_simple_config_gets_a_default_remote_candidate(
     assert config.mode is RuntimeMode.DEFAULT
     assert config.remote is not None
     assert config.remote.url == (
-        "https://mcp.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp"
+        "https://mcp-intl.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp"
     )
 
 

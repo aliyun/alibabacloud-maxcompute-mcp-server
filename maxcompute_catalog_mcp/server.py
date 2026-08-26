@@ -274,18 +274,33 @@ async def _probe_remote_mcp(
     await probe_remote_mcp(config, token_provider)
 
 
+async def _initialize_remote_mcp(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+) -> None:
+    """Issue a Catalog token and authenticate one regional MCP endpoint."""
+
+    try:
+        await token_provider.get_access_token()
+    except Exception:  # noqa: BLE001 -- normalize SDK and transport failures.
+        raise RemoteInitializationError(
+            "Remote MCP token issuance failed during initialization"
+        ) from None
+    try:
+        await _probe_remote_mcp(config, token_provider)
+    except Exception:  # noqa: BLE001 -- normalize remote transport failures.
+        raise RemoteInitializationError(
+            "Remote MCP initialization failed"
+        ) from None
+
+
 async def _run_forced_remote_stdio(
     config: RemoteRuntimeConfig,
     token_provider: CatalogAccessTokenProvider,
 ) -> None:
-    """Initialize and run explicit remote mode without a local fallback."""
+    """Initialize and run remote mode without a local fallback."""
 
-    try:
-        await _probe_remote_mcp(config, token_provider)
-    except Exception:  # noqa: BLE001 -- normalize SDK and transport failures.
-        raise RemoteInitializationError(
-            "Remote MCP initialization failed in remote mode"
-        ) from None
+    await _initialize_remote_mcp(config, token_provider)
     await _run_remote_proxy(config, token_provider)
 
 
@@ -293,7 +308,7 @@ async def _run_default_stdio(
     runtime_config: RuntimeConfig,
     config_path: str | None,
 ) -> None:
-    """Prefer an authenticated remote MCP, otherwise start original local stdio."""
+    """Initialize remote once at startup, otherwise start original local stdio."""
 
     remote = runtime_config.remote
     if remote is not None:
@@ -302,7 +317,7 @@ async def _run_default_stdio(
                 config_path,
                 runtime_config.profile,
             )
-            await _probe_remote_mcp(remote, token_provider)
+            await _initialize_remote_mcp(remote, token_provider)
         except Exception as error:  # noqa: BLE001 -- default mode must fall back.
             _LOGGER.warning(
                 "Remote MCP initialization failed; falling back to local mode (%s)",
@@ -378,7 +393,10 @@ def main() -> None:
             sys.exit("Remote MCP token provider initialization failed")
         try:
             asyncio.run(
-                _run_forced_remote_stdio(runtime_config.remote, token_provider)
+                _run_forced_remote_stdio(
+                    runtime_config.remote,
+                    token_provider,
+                )
             )
         except RemoteInitializationError as error:
             sys.exit(str(error))

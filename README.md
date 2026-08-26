@@ -19,7 +19,7 @@ A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launche
 
 ## Features
 
-- **Backward-compatible configuration**: with no new fields, remote is selected only for a published same-network regional MCP endpoint; every other setup continues through the legacy local SDK.
+- **Backward-compatible configuration**: existing FE/Catalog endpoints determine Region and public/VPC network; simple `region` + `network` config derives FE, Catalog, and MCP endpoints without a Region registry.
 - **Transparent remote mode**: stdio MCP messages are relayed to the hosted Streamable HTTP endpoint without rebuilding or renaming the remote tool surface.
 - **Current protocol support**: MCP Python SDK 2.x preserves modern `2026-07-28` request metadata and routing headers while retaining legacy initialize compatibility.
 - **Standard CatalogAPI authentication**: the remote proxy signs the bodyless `mcpAccessToken` operation with the existing credential provider and resolves current AK/STS/ECS RAM Role credentials again on renewal.
@@ -59,11 +59,10 @@ incidents, production outages, vulnerabilities, or confidential data cases.
 The launcher defaults to `default` for upgrades from old configurations. It
 derives the Region and public/VPC network from the selected legacy FE and
 Catalog endpoints, or uses an explicit `region` plus `network` simple config.
-When a published matching MCP endpoint exists and this process uses stdio, it
-first obtains a CatalogAPI token and completes an authenticated MCP
-`initialize`; success selects remote, while token issuance, connection,
-authentication, or initialize failure falls back to the original local
-implementation. Use `--mode local` to pin that implementation.
+When this process uses stdio and Region/network can be determined, it obtains a
+CatalogAPI token and authenticates the one regional MCP endpoint with
+`initialize`. Token issuance or remote initialization failure falls back to the
+original local implementation. Use `--mode local` to pin that implementation.
 
 | Mode | MCP path | Backend | Transport exposed by this process |
 | --- | --- | --- | --- |
@@ -156,9 +155,8 @@ The simplest endpoint configuration is:
 }
 ```
 
-`network: "vpc"` synthesizes the corresponding intranet FE and Catalog
-endpoints. Remote MCP URLs are never synthesized: `default` still selects only
-an endpoint from the published registry below.
+`region` and `network` synthesize FE, Catalog, and MCP endpoints by rule.
+`network: "vpc"` uses intranet FE/Catalog endpoints and a VPC MCP endpoint.
 
 #### Local-mode credential precedence
 
@@ -250,18 +248,15 @@ local session-switching tools.
 #### Default selection and remote overrides
 
 Released top-level `maxcompute`, top-level `odps`, named `configs`, and
-environment-only configurations all continue to load. For stdio, `default`
-uses only this explicit published registry and never constructs an unlisted
-host:
+environment-only configurations all continue to load. Endpoint derivation has
+no Region list:
 
-| MaxCompute network | Region | Automatically selected MCP endpoint |
+| Service | public rule | VPC rule |
 | --- | --- | --- |
-| public | `cn-hangzhou` | `https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp` |
-| public | `cn-hongkong` | `https://mcp.cn-hongkong.maxcompute.aliyun.com/mcp` |
-| public | `ap-southeast-1` | `https://mcp.ap-southeast-1.maxcompute.aliyun.com/mcp` |
-| VPC | `cn-hangzhou` | `https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp` |
-| VPC | `cn-hongkong` | `https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp` |
-| VPC | `ap-southeast-1` | `https://mcp.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp` |
+| FE | `https://service.<region>.maxcompute.aliyun.com/api` | `https://service.<region>-intranet.maxcompute.aliyun-inc.com/api` |
+| CatalogAPI | `https://catalogapi.<region>.maxcompute.aliyun.com` | `https://catalogapi.<region>-intranet.maxcompute.aliyun-inc.com` |
+| MCP for Mainland China Region (`cn-*`, except `cn-hongkong`) | `https://mcp.<region>.maxcompute.aliyun.com/mcp` | `https://mcp.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
+| MCP for overseas Region (including `cn-hongkong`) | `https://mcp-intl.<region>.maxcompute.aliyun.com/mcp` | `https://mcp-intl.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
 
 For legacy configuration, recognized FE and Catalog endpoints both contribute
 Region/network evidence. Public endpoints select public MCP; recognized VPC or
@@ -270,19 +265,19 @@ must identify the same Region and network. Conflicting endpoints never select
 remote, and explicit `region`/`network` values that contradict a recognized
 endpoint are rejected as invalid configuration.
 
-A VPC configuration never selects public MCP or crosses Regions. A Region with
-no listed matching MCP endpoint, only custom or historical endpoints, conflicting
-FE/Catalog evidence, or a local HTTP transport stays on legacy local behavior
-under `default`; explicit `remote` mode fails closed.
+A VPC configuration never selects public MCP or crosses Regions. Custom or
+historical endpoints with no verifiable Region/network, conflicting FE/Catalog
+evidence, or a local HTTP transport stay on legacy local behavior under
+`default`; explicit `remote` mode fails closed.
 
-The `mcp` versus `mcp-intl` distinction selects the browser OAuth entry when an
-MCP client connects directly to Remote MCP. This local remote proxy instead
-signs CatalogAPI with AK/STS and sends the issued `mcpc_` token, so it does not
-enter OAuth; legacy FE, Catalog, and Tunnel endpoints neither contain nor
-distinguish the account site. Consequently, `default` does not infer China site
-versus International site. It selects the stable default above from only the
-Region and public/VPC network. A published same-network `mcp-intl` URL is an
-equivalent explicit `remote.url` override; VPC must still use the same Region.
+Endpoint naming is determined only by Region: Mainland China Regions (`cn-*`,
+except `cn-hongkong`) use `mcp`, while `cn-hongkong` and every other overseas
+Region use `mcp-intl`. This does not detect or distinguish account sites: the
+CatalogAPI-issued token path does not enter RAM OAuth. The derived endpoint is
+authenticated once during process startup and remains fixed for the process
+lifetime. Later CatalogAPI token renewal does not repeat initialization. When
+`remote.url` is explicitly configured, only that URL is used; VPC must still
+use the same Region.
 
 A minimal remote override reuses the existing MaxCompute configuration and
 credentials:
@@ -327,7 +322,7 @@ uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --po
 uv run alibabacloud-maxcompute-mcp-server --config /path/to/config.json
 ```
 
-Known endpoints need no site field under `default`. Add
+Derived regional endpoints need no site field under `default`. Add
 `--mode remote --remote-url https://<REMOTE_MCP_HOST>/mcp` only to override the
 default entry.
 
@@ -431,7 +426,7 @@ Notes:
 }
 ```
 
-For a published same-network regional endpoint, omit `--mode` and
+For a rule-derived same-network regional endpoint, omit `--mode` and
 `--remote-url` and let `default` probe it. Do not put AccessKey IDs, secrets, STS
 tokens, or bearer tokens in MCP client arguments.
 

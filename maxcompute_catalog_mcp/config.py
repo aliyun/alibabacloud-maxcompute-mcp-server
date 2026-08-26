@@ -86,14 +86,16 @@ def _resolve_simple_endpoints(
         raise ValueError("region is required when network is configured")
     if network and _REGION_PATTERN.fullmatch(region) is None:
         raise ValueError("region is invalid for endpoint synthesis")
-    if not maxcompute_endpoint and region and network:
+    if region and network:
         if network == "public":
-            maxcompute_endpoint = f"https://service.{region}.maxcompute.aliyun.com/api"
+            maxcompute_endpoint = maxcompute_endpoint or (
+                f"https://service.{region}.maxcompute.aliyun.com/api"
+            )
             catalogapi_endpoint = catalogapi_endpoint or (
                 f"https://catalogapi.{region}.maxcompute.aliyun.com"
             )
         else:
-            maxcompute_endpoint = (
+            maxcompute_endpoint = maxcompute_endpoint or (
                 f"https://service.{region}-intranet.maxcompute.aliyun-inc.com/api"
             )
             catalogapi_endpoint = catalogapi_endpoint or (

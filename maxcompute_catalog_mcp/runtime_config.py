@@ -31,12 +31,7 @@ class EndpointNetwork(str, Enum):
 
 @dataclass(frozen=True)
 class EndpointIdentity:
-    """Region and network identity extracted from a known endpoint pattern.
-
-    Account site is intentionally absent. China-site versus International-site
-    selects a browser OAuth entry, while this proxy authenticates with a
-    CatalogAPI-issued token and the MaxCompute data endpoints are site-neutral.
-    """
+    """Region and network identity extracted from a service endpoint."""
 
     region: str
     network: EndpointNetwork
@@ -51,7 +46,7 @@ class RemoteRuntimeConfig:
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    """Requested mode plus a validated remote candidate, when available."""
+    """Requested mode plus a validated remote endpoint, when available."""
 
     mode: RuntimeMode
     profile: str = ""
@@ -86,30 +81,6 @@ _GLOBAL_PUBLIC_MCP_HOSTS = frozenset(
 )
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _REMOTE_FIELDS = frozenset({"url"})
-
-# Published service endpoints are an explicit registry. Never synthesize a
-# hostname for a Region that is absent here. The registry chooses one stable
-# default; it does not infer an account site from a legacy MaxCompute endpoint.
-_PUBLISHED_REMOTE_ENDPOINTS = {
-    (EndpointNetwork.PUBLIC, "cn-hangzhou"): (
-        "https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp"
-    ),
-    (EndpointNetwork.PUBLIC, "cn-hongkong"): (
-        "https://mcp.cn-hongkong.maxcompute.aliyun.com/mcp"
-    ),
-    (EndpointNetwork.PUBLIC, "ap-southeast-1"): (
-        "https://mcp.ap-southeast-1.maxcompute.aliyun.com/mcp"
-    ),
-    (EndpointNetwork.VPC, "cn-hangzhou"): (
-        "https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp"
-    ),
-    (EndpointNetwork.VPC, "cn-hongkong"): (
-        "https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp"
-    ),
-    (EndpointNetwork.VPC, "ap-southeast-1"): (
-        "https://mcp.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp"
-    ),
-}
 
 
 def _first_non_empty(*values: Any) -> str:
@@ -217,6 +188,23 @@ def _mcp_endpoint_identity(url: str) -> EndpointIdentity | None:
     )
 
 
+def _is_mainland_china_region(region: str) -> bool:
+    """Return whether a Region uses the Mainland China MCP hostname."""
+
+    return region.startswith("cn-") and region != "cn-hongkong"
+
+
+def _regional_mcp_url(identity: EndpointIdentity) -> str:
+    """Synthesize one MCP endpoint from Region and network."""
+
+    prefix = "mcp" if _is_mainland_china_region(identity.region) else "mcp-intl"
+    if identity.network is EndpointNetwork.PUBLIC:
+        return f"https://{prefix}.{identity.region}.maxcompute.aliyun.com/mcp"
+    return (
+        f"https://{prefix}.{identity.region}-vpc.maxcompute.aliyun-inc.com/mcp"
+    )
+
+
 def _is_loopback_url(url: str) -> bool:
     host = _endpoint_host(url)
     return host in _LOOPBACK_HOSTS or host.endswith(".localhost")
@@ -294,12 +282,10 @@ def load_runtime_config(
 ) -> RuntimeConfig:
     """Resolve a safe remote candidate for the requested startup mode.
 
-    No configured mode means ``default``. Default mode probes remote only when
-    FE/Catalog endpoints or explicit simple config identify one network and
-    Region with an explicitly published MCP endpoint. Account site is not an
-    input because this flow uses a CatalogAPI-issued token rather than browser
-    OAuth. Unsupported, custom, conflicting, or unpublished endpoints leave no
-    remote candidate, so the server starts the original local implementation.
+    No configured mode means ``default``. FE/Catalog endpoints or explicit
+    simple config identify the Region and network used to derive one regional
+    MCP endpoint. Custom or conflicting endpoints leave no remote
+    candidate, so the server starts the original local implementation.
     """
 
     document = _load_document(config_path)
@@ -373,20 +359,11 @@ def load_runtime_config(
     if endpoint_identity is None:
         if requested_mode is RuntimeMode.REMOTE:
             raise ValueError(
-                "no published remote MCP endpoint matches the MaxCompute endpoint"
-            )
-        return RuntimeConfig(mode=RuntimeMode.DEFAULT, profile=selected_name)
-    published_url = _PUBLISHED_REMOTE_ENDPOINTS.get(
-        (endpoint_identity.network, endpoint_identity.region)
-    )
-    if not published_url:
-        if requested_mode is RuntimeMode.REMOTE:
-            raise ValueError(
-                "no published remote MCP endpoint matches the MaxCompute endpoint"
+                "remote MCP endpoint cannot be derived from the MaxCompute config"
             )
         return RuntimeConfig(mode=RuntimeMode.DEFAULT, profile=selected_name)
     return RuntimeConfig(
         mode=requested_mode,
         profile=selected_name,
-        remote=RemoteRuntimeConfig(url=published_url),
+        remote=RemoteRuntimeConfig(url=_regional_mcp_url(endpoint_identity)),
     )

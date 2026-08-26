@@ -314,22 +314,25 @@ def test_load_config_missing_endpoint_raises(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("network", "maxcompute_endpoint", "catalogapi_endpoint"),
+    ("region", "network", "maxcompute_endpoint", "catalogapi_endpoint"),
     [
         (
+            "cn-hangzhou",
             "public",
             "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
             "https://catalogapi.cn-hangzhou.maxcompute.aliyun.com",
         ),
         (
+            "eu-central-1",
             "vpc",
-            "https://service.cn-hangzhou-intranet.maxcompute.aliyun-inc.com/api",
-            "https://catalogapi.cn-hangzhou-intranet.maxcompute.aliyun-inc.com",
+            "https://service.eu-central-1-intranet.maxcompute.aliyun-inc.com/api",
+            "https://catalogapi.eu-central-1-intranet.maxcompute.aliyun-inc.com",
         ),
     ],
 )
 def test_simple_region_network_config_synthesizes_matching_endpoints(
     tmp_path: Path,
+    region: str,
     network: str,
     maxcompute_endpoint: str,
     catalogapi_endpoint: str,
@@ -339,7 +342,7 @@ def test_simple_region_network_config_synthesizes_matching_endpoints(
         json.dumps(
             {
                 "maxcompute": {
-                    "region": "cn-hangzhou",
+                    "region": region,
                     "network": network,
                 }
             }
@@ -349,10 +352,39 @@ def test_simple_region_network_config_synthesizes_matching_endpoints(
 
     cfg = load_config(str(cfg_file))
 
-    assert cfg.region == "cn-hangzhou"
+    assert cfg.region == region
     assert cfg.network == network
     assert cfg.maxcompute_endpoint == maxcompute_endpoint
     assert cfg.catalogapi_endpoint == catalogapi_endpoint
+
+
+def test_simple_config_derives_missing_catalog_for_explicit_fe(
+    tmp_path: Path,
+) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "region": "us-west-1",
+                    "network": "public",
+                    "maxcompute_endpoint": (
+                        "https://service.us-west-1.maxcompute.aliyun.com/api"
+                    ),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_file))
+
+    assert cfg.maxcompute_endpoint == (
+        "https://service.us-west-1.maxcompute.aliyun.com/api"
+    )
+    assert cfg.catalogapi_endpoint == (
+        "https://catalogapi.us-west-1.maxcompute.aliyun.com"
+    )
 
 
 def test_simple_region_network_environment_config_synthesizes_vpc_endpoints(
