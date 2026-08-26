@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-26
+
 ### Added
 
 - Remote proxy failures now preserve safe CatalogAPI and Gateway Request IDs in
@@ -49,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Rule-based public and VPC endpoint derivation for Mainland China and
   international Regions without a fixed Region registry.
 
-[Unreleased]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.2...v0.1.3
