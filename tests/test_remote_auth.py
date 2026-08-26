@@ -47,9 +47,7 @@ def test_catalog_access_token_renewal_is_single_flight() -> None:
         client = RecordingCatalogTokenClient()
         provider = CatalogAccessTokenProvider(client=client)
 
-        tokens = await asyncio.gather(
-            *(provider.get_access_token() for _ in range(12))
-        )
+        tokens = await asyncio.gather(*(provider.get_access_token() for _ in range(12)))
 
         assert tokens == ["mcpc_fixture-token"] * 12
         assert client.calls == 1

@@ -7,10 +7,11 @@ A ClientSet bundles everything that is bound to a single named config:
 credentials client, ODPS compute client, Catalog SDK client, and the
 default_project / namespace_id that travel with that identity.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Optional
+from typing import Any
 
 from .config import (
     MaxComputeCatalogConfig,
@@ -26,10 +27,43 @@ class ClientSet:
     """All runtime clients/handles bound to one named config."""
 
     sdk: MaxComputeCatalogSdk
-    maxcompute_client: Optional[MaxComputeClient]
+    maxcompute_client: MaxComputeClient | None
     credential_client: Any
     default_project: str
     namespace_id: str
+
+
+@dataclass
+class CatalogClientSet:
+    """Credential and Catalog clients required by the remote proxy."""
+
+    sdk: MaxComputeCatalogSdk
+    credential_client: Any
+
+
+def build_catalog_client_set(cfg: MaxComputeCatalogConfig) -> CatalogClientSet:
+    """Build the remote proxy clients without initializing PyODPS."""
+
+    credential_client = get_credentials_client(
+        access_key_id=cfg.access_key_id,
+        access_key_secret=cfg.access_key_secret,
+        security_token=cfg.security_token,
+    )
+    resolved = resolve_protocol_and_endpoints(cfg)
+    if not resolved.catalogapi_host:
+        raise RuntimeError(
+            "Cannot initialize remote MCP without a CatalogAPI endpoint. "
+            "Set catalogapi_endpoint or use a standard MaxCompute endpoint."
+        )
+    sdk = MaxComputeCatalogSdk.create(
+        cfg,
+        credential_client=credential_client,
+        resolved=resolved,
+    )
+    return CatalogClientSet(
+        sdk=sdk,
+        credential_client=credential_client,
+    )
 
 
 def build_client_set(cfg: MaxComputeCatalogConfig) -> ClientSet:
@@ -53,7 +87,9 @@ def build_client_set(cfg: MaxComputeCatalogConfig) -> ClientSet:
 
     resolved = resolve_protocol_and_endpoints(cfg)
     maxcompute_client = MaxComputeClient.create(
-        cfg, credential_client=credential_client, resolved=resolved,
+        cfg,
+        credential_client=credential_client,
+        resolved=resolved,
     )
 
     catalogapi_endpoint = cfg.catalogapi_endpoint
@@ -65,7 +101,8 @@ def build_client_set(cfg: MaxComputeCatalogConfig) -> ClientSet:
             )
         try:
             catalogapi_endpoint = resolve_catalogapi_endpoint_with_client(
-                maxcompute_client.odps_client, resolved.maxcompute_url,
+                maxcompute_client.odps_client,
+                resolved.maxcompute_url,
             )
         except Exception as e:
             raise RuntimeError(f"Failed to resolve catalogapi endpoint: {e}") from e
@@ -76,7 +113,9 @@ def build_client_set(cfg: MaxComputeCatalogConfig) -> ClientSet:
     resolved = resolve_protocol_and_endpoints(cfg)
 
     sdk = MaxComputeCatalogSdk.create(
-        cfg, credential_client=credential_client, resolved=resolved,
+        cfg,
+        credential_client=credential_client,
+        resolved=resolved,
     )
 
     return ClientSet(

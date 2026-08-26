@@ -8,17 +8,18 @@ Handler implementations are split across mixin modules:
 
 Shared utilities live in tools_common.py.
 """
+
 from __future__ import annotations
 
 import logging
 from collections import OrderedDict
 from threading import Lock, RLock
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from odps import ODPS
 
 from .client_factory import ClientSet, build_client_set
-from .maxcompute_client import MaxComputeCatalogSdk, MaxComputeClient, _FULL_USER_AGENT
+from .maxcompute_client import _FULL_USER_AGENT, MaxComputeCatalogSdk, MaxComputeClient
 from .mcp_protocol import JsonRpcError
 from .tools_catalog import CatalogMixin
 from .tools_common import ToolSpec, input_schema, int_prop, string_prop
@@ -41,7 +42,14 @@ class CredentialClient(Protocol):
     def get_credential(self) -> Any: ...
 
 
-class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaMixin, SessionMixin):
+class Tools(
+    CatalogMixin,
+    ComputeMixin,
+    SecurityMixin,
+    DesignerMixin,
+    TableMetaMixin,
+    SessionMixin,
+):
     """MCP tools implementation.
 
     - MCP payload: {content:[{type:"text", text:"<json>"}]}; JSON convention for model extraction:
@@ -58,11 +66,11 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
         sdk: MaxComputeCatalogSdk,
         default_project: str = "",
         namespace_id: str = "",
-        maxcompute_client: Optional[MaxComputeClient] = None,
-        credential_client: Optional[CredentialClient] = None,
-        configs: Optional[Dict[str, Any]] = None,
+        maxcompute_client: MaxComputeClient | None = None,
+        credential_client: CredentialClient | None = None,
+        configs: dict[str, Any] | None = None,
         default_name: str = "",
-        client_set_builder: Optional[Any] = None,
+        client_set_builder: Any | None = None,
     ):
         self.sdk = sdk
         self.default_project = default_project or ""
@@ -80,13 +88,16 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
         self._compute_client_cache_lock = Lock()
         # Enable ODPS2 type extensions (DATE, etc.) once at init, not per-request
         from odps import options as odps_options
+
         odps_options.sql.use_odps2_extension = True
 
         # ---- named-config registry (multi-region / multi-identity switching) ----
         # configs: {name -> MaxComputeCatalogConfig}; the passed sdk/maxcompute_client/...
         # correspond to default_name and are seeded into the client-set cache.
-        self._configs: Dict[str, Any] = dict(configs or {})
-        self._default_name = default_name or (next(iter(self._configs)) if self._configs else "")
+        self._configs: dict[str, Any] = dict(configs or {})
+        self._default_name = default_name or (
+            next(iter(self._configs)) if self._configs else ""
+        )
         self._current_name = self._default_name
         # Builder is injectable for tests; defaults to the real client_factory.
         self._client_set_builder = client_set_builder or build_client_set
@@ -94,7 +105,7 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
         # provide per-session isolation — the active config is process-global
         # (see use_config docs / _activate_config note).
         self._config_switch_lock = RLock()
-        self._client_set_cache: Dict[str, ClientSet] = {}
+        self._client_set_cache: dict[str, ClientSet] = {}
         if self._current_name:
             self._client_set_cache[self._current_name] = ClientSet(
                 sdk=sdk,
@@ -107,10 +118,7 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
     # ---- credential / client management ----
 
     def _create_odps_client_with_credentials(
-        self,
-        underlying: Any,
-        project: str,
-        endpoint: str
+        self, underlying: Any, project: str, endpoint: str
     ) -> ODPS:
         """Create ODPS client by copying credentials from existing client."""
         # Prefer reusing the parent client's account object (CredentialProviderAccount holds a Credentials Client reference and auto-refreshes)
@@ -141,15 +149,21 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
 
         # Final fallback: get credentials from default chain (static snapshot, only used when no credential_client)
         try:
-            from .credentials import get_credentials_from_default_chain
             from odps.accounts import StsAccount
+
+            from .credentials import get_credentials_from_default_chain
+
             creds = get_credentials_from_default_chain()
         except Exception as cred_err:
-            logger.exception("Failed to get credentials from default chain: %s", cred_err)
-            raise RuntimeError("No valid credentials found in default chain") from cred_err
+            logger.exception("Failed to get credentials from default chain")
+            raise RuntimeError(
+                "No valid credentials found in default chain"
+            ) from cred_err
 
         if creds.security_token:
-            account = StsAccount(creds.access_key_id, creds.access_key_secret, creds.security_token)
+            account = StsAccount(
+                creds.access_key_id, creds.access_key_secret, creds.security_token
+            )
             return ODPS(
                 account=account,
                 project=project,
@@ -165,7 +179,7 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             rest_client_kwargs={"user_agent": _FULL_USER_AGENT},
         )
 
-    def _get_compute_client_for_project(self, project: str) -> Optional[MaxComputeClient]:
+    def _get_compute_client_for_project(self, project: str) -> MaxComputeClient | None:
         """Get or create a compute client for the specified project.
 
         If project matches the default_project, returns the default maxcompute_client.
@@ -187,7 +201,9 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             # Get the underlying ODPS client (outside lock to avoid holding lock during I/O)
             underlying = self.maxcompute_client.odps_client
             endpoint = underlying.endpoint
-            client = self._create_odps_client_with_credentials(underlying, project, endpoint)
+            client = self._create_odps_client_with_credentials(
+                underlying, project, endpoint
+            )
             new_client = MaxComputeClient(_client=client)
 
             # Hold lock only for the cache write to ensure atomicity
@@ -197,18 +213,23 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     logger.debug(
                         "Concurrent client creation detected for project %r, "
                         "using cached client instead of newly created one",
-                        project
+                        project,
                     )
                     return self._compute_client_cache[project]
                 # Add to cache with LRU eviction
                 self._compute_client_cache[project] = new_client
-                while len(self._compute_client_cache) > self._max_compute_client_cache_size:
+                while (
+                    len(self._compute_client_cache)
+                    > self._max_compute_client_cache_size
+                ):
                     oldest_key = next(iter(self._compute_client_cache))
                     del self._compute_client_cache[oldest_key]
-                    logger.debug("Evicted oldest compute client from cache: %s", oldest_key)
+                    logger.debug(
+                        "Evicted oldest compute client from cache: %s", oldest_key
+                    )
             return new_client
         except Exception as e:
-            logger.exception("Failed to create compute client for project %r: %s", project, e)
+            logger.exception("Failed to create compute client for project %r", project)
             raise RuntimeError(
                 f"Cannot create compute client for project '{project}'. "
                 f"Check credentials and endpoint configuration. Original error: {e}"
@@ -261,15 +282,26 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                 m = resp.to_map() if hasattr(resp, "to_map") else resp
                 enabled = m.get("schemaEnabled")
                 # schemaEnabled absent on older API versions → assume 3-level
-                self._schema_enabled_cache[project] = True if enabled is None else bool(enabled)
-                logger.debug("Project %r schemaEnabled=%s", project, self._schema_enabled_cache[project])
-            except Exception as e:
-                logger.warning("get_project(%r) failed, assuming schema-enabled: %s", project, e)
+                self._schema_enabled_cache[project] = (
+                    True if enabled is None else bool(enabled)
+                )
+                logger.debug(
+                    "Project %r schemaEnabled=%s",
+                    project,
+                    self._schema_enabled_cache[project],
+                )
+            except Exception as e:  # noqa: BLE001 -- Catalog SDK failures are transient.
+                logger.warning(
+                    "get_project(%r) failed, assuming schema-enabled: %s", project, e
+                )
                 return True  # don't cache transient errors — allow retry on next call
         return self._schema_enabled_cache[project]
 
     def specs(self) -> list[ToolSpec]:
-        project_prop = string_prop("MaxCompute project name", self.default_project if self.default_project else None)
+        project_prop = string_prop(
+            "MaxCompute project name",
+            self.default_project if self.default_project else None,
+        )
         schema_prop = string_prop("Schema name (database name)", "default")
         table_prop = string_prop("Table name", None)
         page_size_prop = int_prop("Page size", 100)
@@ -279,7 +311,12 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             ToolSpec(
                 name="list_projects",
                 description="List all Project IDs (Catalogs) accessible to the current account. Returns JSON: success, data (containing projects, next_page_token), summary (count overview)",
-                input_schema=input_schema({"pageSize": page_size_prop, "token": string_prop("Pagination token (optional)")}),
+                input_schema=input_schema(
+                    {
+                        "pageSize": page_size_prop,
+                        "token": string_prop("Pagination token (optional)"),
+                    }
+                ),
             ),
             ToolSpec(
                 name="get_project",
@@ -289,16 +326,20 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
             ToolSpec(
                 name="list_schemas",
                 description="List schemas under a project. Returns JSON: success, data (containing schemas, next_page_token), summary (count overview)",
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "pageSize": page_size_prop,
-                    "token": string_prop("Pagination token (optional)"),
-                }),
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "pageSize": page_size_prop,
+                        "token": string_prop("Pagination token (optional)"),
+                    }
+                ),
             ),
             ToolSpec(
                 name="get_schema",
                 description="Get detailed information about the specified schema, including metadata and properties",
-                input_schema=input_schema({"project": project_prop, "schema": schema_prop}),
+                input_schema=input_schema(
+                    {"project": project_prop, "schema": schema_prop}
+                ),
             ),
             ToolSpec(
                 name="list_tables",
@@ -338,18 +379,26 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "etag (concurrency control token), createTime, lastModifiedTime — automatically maintained by the server, not modifiable.\n"
                     "It is recommended to call this tool first to get the current snapshot before calling update_table."
                 ),
-                input_schema=input_schema({"project": project_prop, "schema": schema_prop, "table": table_prop}),
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "schema": schema_prop,
+                        "table": table_prop,
+                    }
+                ),
             ),
             ToolSpec(
                 name="get_partition_info",
                 description="Query the partition list of a partitioned table, including data volume and time metrics such as latest access time (LAT) for each partition",
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "schema": schema_prop,
-                    "table": table_prop,
-                    "pageSize": page_size_prop,
-                    "token": string_prop("Pagination token (optional)"),
-                }),
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "schema": schema_prop,
+                        "table": table_prop,
+                        "pageSize": page_size_prop,
+                        "token": string_prop("Pagination token (optional)"),
+                    }
+                ),
             ),
         ]
 
@@ -363,24 +412,28 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "project specifies the project for submitting the job (for billing), not the project where the table resides in SQL; if omitted, default_project is used.\n"
                     "SQL table reference format is the same as execute_sql."
                 ),
-                input_schema=input_schema({
-                    "project": string_prop(
-                        "Project for submitting the ODPS job (for billing). "
-                        "If not specified, defaults to default_project in the configuration. "
-                        "Note: this is the job submission project, not the project where the table resides in SQL"
-                    ),
-                    "sql": string_prop("MaxCompute SQL statement (SELECT queries only)"),
-                    "hints": {
-                        "type": "object",
-                        "description": (
-                            "ODPS runtime parameters (optional). 3-level (schema-enabled) projects must pass "
-                            "{\"odps.namespace.schema\": \"true\"} during estimation, otherwise schema.table references will fail "
-                            "to parse during cost estimation, resulting in a stub (estimatedCU=0) and making execute_sql's maxCU protection ineffective. "
-                            "Should be consistent with execute_sql's hints."
+                input_schema=input_schema(
+                    {
+                        "project": string_prop(
+                            "Project for submitting the ODPS job (for billing). "
+                            "If not specified, defaults to default_project in the configuration. "
+                            "Note: this is the job submission project, not the project where the table resides in SQL"
                         ),
-                        "additionalProperties": {"type": "string"},
-                    },
-                }),
+                        "sql": string_prop(
+                            "MaxCompute SQL statement (SELECT queries only)"
+                        ),
+                        "hints": {
+                            "type": "object",
+                            "description": (
+                                "ODPS runtime parameters (optional). 3-level (schema-enabled) projects must pass "
+                                '{"odps.namespace.schema": "true"} during estimation, otherwise schema.table references will fail '
+                                "to parse during cost estimation, resulting in a stub (estimatedCU=0) and making execute_sql's maxCU protection ineffective. "
+                                "Should be consistent with execute_sql's hints."
+                            ),
+                            "additionalProperties": {"type": "string"},
+                        },
+                    }
+                ),
             ),
             ToolSpec(
                 name="execute_sql",
@@ -396,54 +449,64 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "Sync (async=false): waits for completion and returns results directly; on timeout (default 30s), returns instanceId for async tracking.\n"
                     "[Large Result Handling] Without output_uri, results are returned inline; exceeding MAXC_RESULT_ROW_CAP (default 1000) rows will be truncated (truncated=true), "
                     "rowCount shows the actual total rows. For large expected results (e.g. SELECT * without LIMIT, dump semantics, or previous truncated=true), pass "
-                    "output_uri=\"file:///tmp/maxc/<name>.jsonl\" for streaming to disk; response only returns preview (first 20 rows) + file path.\n"
+                    'output_uri="file:///tmp/maxc/<name>.jsonl" for streaming to disk; response only returns preview (first 20 rows) + file path.\n'
                     "[project] Specifies the project for submitting the job (for billing and permissions), not the project where the table resides in SQL; if omitted, default_project is used.\n"
                     "[SQL Table Reference Format - Important] Before writing SQL, you must call get_table_schema to get the sqlTableRef field, then reference the table in SQL using that format:\n"
                     "- Same project: 3-level uses schema.table (e.g. default.orders); 2-level uses table directly\n"
                     "- Cross-project: 3-level uses project.schema.table; 2-level uses project.table"
                 ),
-                input_schema=input_schema({
-                    "project": string_prop(
-                        "Project for submitting the ODPS job (for billing and access control). "
-                        "If not specified, defaults to default_project in the configuration. "
-                        "Note: this is the job submission project, not the project where the table resides in SQL"
-                    ),
-                    "sql": string_prop("MaxCompute SQL statement (SELECT queries only)"),
-                    "async": {
-                        "type": "boolean",
-                        "description": (
-                            "Whether to execute asynchronously (default true). "
-                            "true: returns instanceId immediately after submission, use get_instance_status / get_instance to retrieve results asynchronously; "
-                            "false: waits synchronously for completion and returns results directly; on timeout (see timeout parameter), returns instanceId for async tracking."
+                input_schema=input_schema(
+                    {
+                        "project": string_prop(
+                            "Project for submitting the ODPS job (for billing and access control). "
+                            "If not specified, defaults to default_project in the configuration. "
+                            "Note: this is the job submission project, not the project where the table resides in SQL"
                         ),
-                    },
-                    "maxCU": int_prop("Resource usage limit (CU). Cost is checked before execution; if exceeded, user needs to set a higher limit to proceed"),
-                    "timeout": int_prop("Timeout in seconds for sync mode (async=false, optional, default 30s). On timeout, returns instanceId; use get_instance_status / get_instance to query results asynchronously"),
-                    "output_uri": string_prop(
-                        "Optional. Path for streaming large results to disk, e.g. \"file:///tmp/maxc/result.jsonl\". The server automatically inserts instanceId into the filename "
-                        "(e.g. result.<instanceId>.jsonl, see response outputPath for actual path) to prevent overwrites from repeated calls. "
-                        "Only effective in sync mode (async=false) during execute_sql; for async submissions, pass output_uri when calling get_instance. "
-                        "Only file:// scheme is supported; parent directories are created automatically."
-                    ),
-                    "hints": {
-                        "type": "object",
-                        "description": (
-                            "ODPS runtime parameters (optional). Passed as key-value pairs, merged with default hints (caller takes precedence). "
-                            "Common examples: {\"odps.sql.decimal.odps2\": \"true\", "
-                            "\"odps.sql.hive.compatible\": \"true\", "
-                            "\"odps.sql.type.system.odps2\": \"true\"}"
+                        "sql": string_prop(
+                            "MaxCompute SQL statement (SELECT queries only)"
                         ),
-                        "additionalProperties": {"type": "string"},
-                    },
-                }),
+                        "async": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether to execute asynchronously (default true). "
+                                "true: returns instanceId immediately after submission, use get_instance_status / get_instance to retrieve results asynchronously; "
+                                "false: waits synchronously for completion and returns results directly; on timeout (see timeout parameter), returns instanceId for async tracking."
+                            ),
+                        },
+                        "maxCU": int_prop(
+                            "Resource usage limit (CU). Cost is checked before execution; if exceeded, user needs to set a higher limit to proceed"
+                        ),
+                        "timeout": int_prop(
+                            "Timeout in seconds for sync mode (async=false, optional, default 30s). On timeout, returns instanceId; use get_instance_status / get_instance to query results asynchronously"
+                        ),
+                        "output_uri": string_prop(
+                            'Optional. Path for streaming large results to disk, e.g. "file:///tmp/maxc/result.jsonl". The server automatically inserts instanceId into the filename '
+                            "(e.g. result.<instanceId>.jsonl, see response outputPath for actual path) to prevent overwrites from repeated calls. "
+                            "Only effective in sync mode (async=false) during execute_sql; for async submissions, pass output_uri when calling get_instance. "
+                            "Only file:// scheme is supported; parent directories are created automatically."
+                        ),
+                        "hints": {
+                            "type": "object",
+                            "description": (
+                                "ODPS runtime parameters (optional). Passed as key-value pairs, merged with default hints (caller takes precedence). "
+                                'Common examples: {"odps.sql.decimal.odps2": "true", '
+                                '"odps.sql.hive.compatible": "true", '
+                                '"odps.sql.type.system.odps2": "true"}'
+                            ),
+                            "additionalProperties": {"type": "string"},
+                        },
+                    }
+                ),
             ),
             ToolSpec(
                 name="get_instance_status",
                 description="Query job running status, resource consumption (CU), and progress by Instance ID",
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "instanceId": string_prop("Job Instance ID"),
-                }),
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "instanceId": string_prop("Job Instance ID"),
+                    }
+                ),
             ),
             ToolSpec(
                 name="get_instance",
@@ -452,15 +515,17 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "when exceeding MAXC_RESULT_ROW_CAP (default 1000 rows); rowCount shows the actual total. "
                     "For large results, pass output_uri for streaming to disk; response returns preview + outputPath + bytesWritten."
                 ),
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "instanceId": string_prop("Job Instance ID"),
-                    "output_uri": string_prop(
-                        "Optional. Path for streaming large results to disk, e.g. \"file:///tmp/maxc/result.jsonl\". The server inserts instanceId into the filename; "
-                        "for multi-task results, task_name is also appended (e.g. result.<instanceId>.<task_name>.jsonl). See response outputPath for actual path. "
-                        "Only file:// scheme is supported; parent directories are created automatically."
-                    ),
-                }),
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "instanceId": string_prop("Job Instance ID"),
+                        "output_uri": string_prop(
+                            'Optional. Path for streaming large results to disk, e.g. "file:///tmp/maxc/result.jsonl". The server inserts instanceId into the filename; '
+                            "for multi-task results, task_name is also appended (e.g. result.<instanceId>.<task_name>.jsonl). See response outputPath for actual path. "
+                            "Only file:// scheme is supported; parent directories are created automatically."
+                        ),
+                    }
+                ),
             ),
         ]
 
@@ -482,12 +547,18 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                 description="Search Catalog entities (tables/resources/schemas) under the configured namespace (primary account). "
                 "Calls Catalog API namespaces/:search; query uses the syntax defined by the SDK (see query parameter description). "
                 "namespace_id is provided via configuration or the MAXCOMPUTE_NAMESPACE_ID environment variable.",
-                input_schema=input_schema({
-                    "query": string_prop(_search_query_desc),
-                    "pageSize": int_prop("Number of items per page, greater than 0, max 100", 100),
-                    "token": string_prop("Pagination token, obtain next page from the previous response's next_page_token (optional)"),
-                    "orderBy": string_prop(_search_order_desc + " Optional."),
-                }),
+                input_schema=input_schema(
+                    {
+                        "query": string_prop(_search_query_desc),
+                        "pageSize": int_prop(
+                            "Number of items per page, greater than 0, max 100", 100
+                        ),
+                        "token": string_prop(
+                            "Pagination token, obtain next page from the previous response's next_page_token (optional)"
+                        ),
+                        "orderBy": string_prop(_search_order_desc + " Optional."),
+                    }
+                ),
             ),
         ]
 
@@ -505,20 +576,22 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "Note: only supports querying the current user's own permissions; "
                     "querying other users or roles is not supported."
                 ),
-                input_schema=input_schema({
-                    "project": string_prop(
-                        "Target project for the SHOW GRANTS query (only used when include_grants=true). "
-                        "Defaults to default_project if not specified."
-                    ),
-                    "include_grants": {
-                        "type": "boolean",
-                        "description": (
-                            "Whether to execute SHOW GRANTS to query the current user's permissions. "
-                            "Defaults to true. Set to false if you only need identity information "
-                            "and want to avoid the extra network call."
+                input_schema=input_schema(
+                    {
+                        "project": string_prop(
+                            "Target project for the SHOW GRANTS query (only used when include_grants=true). "
+                            "Defaults to default_project if not specified."
                         ),
-                    },
-                }),
+                        "include_grants": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether to execute SHOW GRANTS to query the current user's permissions. "
+                                "Defaults to true. Set to false if you only need identity information "
+                                "and want to avoid the extra network call."
+                            ),
+                        },
+                    }
+                ),
             ),
         ]
 
@@ -533,61 +606,63 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "storageTier (storage tier, e.g. standard/lowfrequency/longterm), "
                     "tableProperties (table creation properties, key-value pairs), hints (SQL hints)."
                 ),
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "schema": schema_prop,
-                    "table": table_prop,
-                    "columns": {
-                        "type": "array",
-                        "description": (
-                            "Column definitions [{name, type, description?, notNull?, generateExpression?}]. "
-                            "notNull=true means the column is NOT NULL (required for primary key columns)."
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "schema": schema_prop,
+                        "table": table_prop,
+                        "columns": {
+                            "type": "array",
+                            "description": (
+                                "Column definitions [{name, type, description?, notNull?, generateExpression?}]. "
+                                "notNull=true means the column is NOT NULL (required for primary key columns)."
+                            ),
+                            "items": {"type": "object"},
+                        },
+                        "partitionColumns": {
+                            "type": "array",
+                            "description": (
+                                "Partition column definitions (optional). Elements can be strings (default STRING type) "
+                                "or {name, type?, description?, generateExpression?} (type defaults to STRING; "
+                                "generateExpression is for AUTO PARTITIONED BY, e.g. "
+                                "\"TRUNC_TIME(sale_date, 'month')\")"
+                            ),
+                            "items": {},
+                        },
+                        "lifecycle": int_prop("Table lifecycle in days (optional)"),
+                        "description": string_prop("Table comment (optional)"),
+                        "ifNotExists": {
+                            "type": "boolean",
+                            "description": "Whether to skip creation without error when table already exists (optional, default false)",
+                        },
+                        "transactional": {
+                            "type": "boolean",
+                            "description": "Whether to create a transactional table (optional, default false). Transactional tables can use primaryKey",
+                        },
+                        "primaryKey": {
+                            "type": "array",
+                            "description": "Primary key column name list (optional), only effective for transactional tables, e.g. ['id']",
+                            "items": {"type": "string"},
+                        },
+                        "storageTier": string_prop(
+                            "Storage tier (optional), e.g. 'standard' / 'lowfrequency' / 'longterm'"
                         ),
-                        "items": {"type": "object"},
-                    },
-                    "partitionColumns": {
-                        "type": "array",
-                        "description": (
-                            "Partition column definitions (optional). Elements can be strings (default STRING type) "
-                            "or {name, type?, description?, generateExpression?} (type defaults to STRING; "
-                            "generateExpression is for AUTO PARTITIONED BY, e.g. "
-                            "\"TRUNC_TIME(sale_date, 'month')\")"
-                        ),
-                        "items": {},
-                    },
-                    "lifecycle": int_prop("Table lifecycle in days (optional)"),
-                    "description": string_prop("Table comment (optional)"),
-                    "ifNotExists": {
-                        "type": "boolean",
-                        "description": "Whether to skip creation without error when table already exists (optional, default false)",
-                    },
-                    "transactional": {
-                        "type": "boolean",
-                        "description": "Whether to create a transactional table (optional, default false). Transactional tables can use primaryKey",
-                    },
-                    "primaryKey": {
-                        "type": "array",
-                        "description": "Primary key column name list (optional), only effective for transactional tables, e.g. ['id']",
-                        "items": {"type": "string"},
-                    },
-                    "storageTier": string_prop(
-                        "Storage tier (optional), e.g. 'standard' / 'lowfrequency' / 'longterm'"
-                    ),
-                    "tableProperties": {
-                        "type": "object",
-                        "description": (
-                            "Table creation properties (optional). Values are converted to strings before being passed to MaxCompute, "
-                            "e.g. {\"transactional\":\"true\"} or {\"transactional\":true}"
-                        ),
-                    },
-                    "hints": {
-                        "type": "object",
-                        "description": (
-                            "SQL hints (optional). Values are converted to strings before being passed to MaxCompute, "
-                            "e.g. {\"odps.sql.type.system.odps2\":\"true\"}"
-                        ),
-                    },
-                }),
+                        "tableProperties": {
+                            "type": "object",
+                            "description": (
+                                "Table creation properties (optional). Values are converted to strings before being passed to MaxCompute, "
+                                'e.g. {"transactional":"true"} or {"transactional":true}'
+                            ),
+                        },
+                        "hints": {
+                            "type": "object",
+                            "description": (
+                                "SQL hints (optional). Values are converted to strings before being passed to MaxCompute, "
+                                'e.g. {"odps.sql.type.system.odps2":"true"}'
+                            ),
+                        },
+                    }
+                ),
             ),
             ToolSpec(
                 name="insert_values",
@@ -598,39 +673,43 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "records will be grouped by partition values and generate INSERT INTO ... PARTITION (...) (data columns) VALUES ..., "
                     "to avoid ODPS partition column count mismatch errors."
                 ),
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "schema": schema_prop,
-                    "table": table_prop,
-                    "columns": {
-                        "type": "array",
-                        "description": "Column name list, e.g. ['id', 'name', 'age']",
-                        "items": {"type": "string"},
-                    },
-                    "partitionColumns": {
-                        "type": "array",
-                        "description": "Partition column name list (optional). When non-empty, writes using static partitions, e.g. ['dt'].",
-                        "items": {"type": "string"},
-                    },
-                    "values": {
-                        "type": "array",
-                        "description": "Multiple rows of data in a 2D array format. e.g. [[1, 'Alice', 20], [2, 'Bob', 25]]",
-                        "items": {
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "schema": schema_prop,
+                        "table": table_prop,
+                        "columns": {
                             "type": "array",
-                            "description": "Single row data value list",
-                            "items": {},
+                            "description": "Column name list, e.g. ['id', 'name', 'age']",
+                            "items": {"type": "string"},
                         },
-                    },
-                    "timeout": int_prop("Timeout in seconds (optional, default 60s). On timeout, returns instanceId; use get_instance_status / get_instance to query results asynchronously"),
-                    "async": {
-                        "type": "boolean",
-                        "description": (
-                            "Whether to execute asynchronously (default false). "
-                            "false: waits for completion and returns results; on timeout (see timeout parameter), returns instanceId for async tracking; "
-                            "true: returns instanceId immediately after submission (partitioned tables return instanceIds list); use get_instance_status / get_instance to retrieve results asynchronously."
+                        "partitionColumns": {
+                            "type": "array",
+                            "description": "Partition column name list (optional). When non-empty, writes using static partitions, e.g. ['dt'].",
+                            "items": {"type": "string"},
+                        },
+                        "values": {
+                            "type": "array",
+                            "description": "Multiple rows of data in a 2D array format. e.g. [[1, 'Alice', 20], [2, 'Bob', 25]]",
+                            "items": {
+                                "type": "array",
+                                "description": "Single row data value list",
+                                "items": {},
+                            },
+                        },
+                        "timeout": int_prop(
+                            "Timeout in seconds (optional, default 60s). On timeout, returns instanceId; use get_instance_status / get_instance to query results asynchronously"
                         ),
-                    },
-                }),
+                        "async": {
+                            "type": "boolean",
+                            "description": (
+                                "Whether to execute asynchronously (default false). "
+                                "false: waits for completion and returns results; on timeout (see timeout parameter), returns instanceId for async tracking; "
+                                "true: returns instanceId immediately after submission (partitioned tables return instanceIds list); use get_instance_status / get_instance to retrieve results asynchronously."
+                            ),
+                        },
+                    }
+                ),
             ),
         ]
 
@@ -644,7 +723,7 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "Update business-semantic metadata of a table. Uses internal read-modify-write with automatic etag handling; "
                     "it is recommended to call get_table_schema first to view the current snapshot.\n"
                     "Parameters are grouped by business object; provide at least one of description/labels/expiration/columns:\n"
-                    "- description: table comment (string); pass empty string \"\" to clear the comment; null is not allowed (omit the field if you don't want to modify).\n"
+                    '- description: table comment (string); pass empty string "" to clear the comment; null is not allowed (omit the field if you don\'t want to modify).\n'
                     "- labels: table label key-value patch.\n"
                     "    set: label key-value pairs to write (required);\n"
                     "    mode: merge strategy, default merge.\n"
@@ -656,71 +735,76 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "    partitionDays: partition expiration days (only meaningful for partitioned tables); individual partitions will be automatically deleted after this many days\n"
                     "                   Both take effect independently; you can set only one\n"
                     "- columns: column-level operations.\n"
-                    "    setComments: {column name or dot-path: new comment}, e.g. {\"id\": \"primary key\", \"addr.city\": \"city\"}, "
+                    '    setComments: {column name or dot-path: new comment}, e.g. {"id": "primary key", "addr.city": "city"}, '
                     "supports STRUCT nested sub-columns\n"
                     "    setNullable: [top-level column names], changes these columns from REQUIRED to NULLABLE (allow null); nested columns not supported\n"
                     "    add:         [{name, type, description?}], appends new columns; new columns are forced to NULLABLE\n"
                     "Server limitations (MaxCompute does not support): deleting columns / changing column types / reordering columns / inserting columns in the middle / "
                     "NULLABLE→REQUIRED / appending REQUIRED columns / modifying nested column mode."
                 ),
-                input_schema=input_schema({
-                    "project": project_prop,
-                    "schema": schema_prop,
-                    "table": table_prop,
-                    "description": string_prop("Table comment (optional); pass empty string \"\" to clear existing comment, omit this field if you don't want to modify"),
-                    "labels": {
-                        "type": "object",
-                        "description": "Table label patch (optional), see the tool's top-level description for semantics",
-                        "required": ["set"],
-                        "properties": {
-                            "set": {
-                                "type": "object",
-                                "additionalProperties": {"type": "string"},
-                            },
-                            "mode": {
-                                "type": "string",
-                                "enum": ["merge", "replace", "delete"],
-                            },
-                        },
-                    },
-                    "expiration": {
-                        "type": "object",
-                        "description": "Expiration policy (optional), unit is days; 0 means disable",
-                        "properties": {
-                            "days": {"type": "integer", "minimum": 0},
-                            "partitionDays": {"type": "integer", "minimum": 0},
-                        },
-                    },
-                    "columns": {
-                        "type": "object",
-                        "description": "Column-level operations (optional)",
-                        "properties": {
-                            "setComments": {
-                                "type": "object",
-                                "additionalProperties": {"type": "string"},
-                            },
-                            "setNullable": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                            "add": {
-                                "type": "array",
-                                "items": {
+                input_schema=input_schema(
+                    {
+                        "project": project_prop,
+                        "schema": schema_prop,
+                        "table": table_prop,
+                        "description": string_prop(
+                            'Table comment (optional); pass empty string "" to clear existing comment, omit this field if you don\'t want to modify'
+                        ),
+                        "labels": {
+                            "type": "object",
+                            "description": "Table label patch (optional), see the tool's top-level description for semantics",
+                            "required": ["set"],
+                            "properties": {
+                                "set": {
                                     "type": "object",
-                                    "properties": {
-                                        "name": {"type": "string"},
-                                        "type": {"type": "string"},
-                                        "description": {"type": "string"},
-                                    },
-                                    "required": ["name", "type"],
+                                    "additionalProperties": {"type": "string"},
+                                },
+                                "mode": {
+                                    "type": "string",
+                                    "enum": ["merge", "replace", "delete"],
                                 },
                             },
                         },
+                        "expiration": {
+                            "type": "object",
+                            "description": "Expiration policy (optional), unit is days; 0 means disable",
+                            "properties": {
+                                "days": {"type": "integer", "minimum": 0},
+                                "partitionDays": {"type": "integer", "minimum": 0},
+                            },
+                        },
+                        "columns": {
+                            "type": "object",
+                            "description": "Column-level operations (optional)",
+                            "properties": {
+                                "setComments": {
+                                    "type": "object",
+                                    "additionalProperties": {"type": "string"},
+                                },
+                                "setNullable": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "add": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {"type": "string"},
+                                            "type": {"type": "string"},
+                                            "description": {"type": "string"},
+                                        },
+                                        "required": ["name", "type"],
+                                    },
+                                },
+                            },
+                        },
+                        "etag": string_prop(
+                            "Optional: explicitly pass etag to enforce optimistic concurrency control (defaults to automatically fetching the latest etag from get_table)"
+                        ),
                     },
-                    "etag": string_prop(
-                        "Optional: explicitly pass etag to enforce optimistic concurrency control (defaults to automatically fetching the latest etag from get_table)"
-                    ),
-                }, required=["table"]),
+                    required=["table"],
+                ),
             ),
         ]
 
@@ -756,7 +840,11 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
                     "switch by one client affects the others; do not rely on per-client isolation there."
                 ),
                 input_schema=input_schema(
-                    {"name": string_prop("Config name to switch to (see list_configs)")},
+                    {
+                        "name": string_prop(
+                            "Config name to switch to (see list_configs)"
+                        )
+                    },
                     required=["name"],
                 ),
             ),
@@ -775,7 +863,7 @@ class Tools(CatalogMixin, ComputeMixin, SecurityMixin, DesignerMixin, TableMetaM
 
     # ---- tool call dispatcher ----
 
-    def call(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         handlers = {
             "list_projects": self.list_projects,
             "get_project": self.get_project,

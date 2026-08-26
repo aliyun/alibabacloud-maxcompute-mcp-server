@@ -45,9 +45,16 @@ tag. In particular, the repository's `v0.1.3` tag declares package version
 2. Build and verify the package locally:
 
    ```bash
-   uv run pytest tests/ -q --no-cov
+   uv run pytest tests/ -q
+   uv run coverage json -o coverage.json
+   uv run python scripts/check_coverage.py coverage.json \
+     --line-fail-under 90 --branch-fail-under 80
+   uv run ruff check maxcompute_catalog_mcp tests scripts
+   uv run ruff format --check maxcompute_catalog_mcp tests scripts
+   uv run mypy maxcompute_catalog_mcp
    uv build
    uvx --from twine twine check --strict dist/*
+   uvx check-wheel-contents dist/*.whl
    ```
 
 3. Merge the release preparation to `master` and require the repository CI to

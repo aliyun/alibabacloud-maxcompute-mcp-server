@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from maxcompute_tea_openapi import models as open_api_models
 from pyodps_catalog.client import Client as CatalogClient
@@ -13,9 +13,9 @@ try:
     from odps.accounts import CredentialProviderAccount
     from odps.rest import default_user_agent as _get_default_user_agent
 except ImportError:
-    ODPS = None  # type: ignore[misc,assignment]
-    CredentialProviderAccount = None  # type: ignore[misc,assignment]
-    _get_default_user_agent = None  # type: ignore[misc,assignment]
+    ODPS = None
+    CredentialProviderAccount = None
+    _get_default_user_agent = None
 
 from .config import (
     MaxComputeCatalogConfig,
@@ -35,7 +35,7 @@ _USER_AGENT = f"alibabacloud-maxcompute-mcp-server/{_VERSION}"
 # Full UA: PyODPS default prefix + MCP suffix, computed once at module load
 try:
     _base_ua = _get_default_user_agent() if _get_default_user_agent else ""
-except Exception:
+except Exception:  # noqa: BLE001 -- optional SDK user-agent hooks are not stable.
     _base_ua = ""
 _FULL_USER_AGENT = f"{_base_ua} {_USER_AGENT}".strip() if _base_ua else _USER_AGENT
 
@@ -100,8 +100,8 @@ class MaxComputeCatalogSdk:
     def create(
         cfg: MaxComputeCatalogConfig,
         credential_client: Any,
-        resolved: Optional[ResolvedEndpoints] = None,
-    ) -> "MaxComputeCatalogSdk":
+        resolved: ResolvedEndpoints | None = None,
+    ) -> MaxComputeCatalogSdk:
         if credential_client is None:
             raise RuntimeError(
                 "credential_client is required for MaxComputeCatalogSdk. "
@@ -128,8 +128,8 @@ class MaxComputeClient:
     def create(
         cfg: MaxComputeCatalogConfig,
         credential_client: Any,
-        resolved: Optional[ResolvedEndpoints] = None,
-    ) -> Optional["MaxComputeClient"]:
+        resolved: ResolvedEndpoints | None = None,
+    ) -> MaxComputeClient | None:
         """Return a compute client, or None if default_project is unset or pyodps unavailable.
 
         Requires credential_client (alibabacloud-credentials Client);
@@ -159,8 +159,12 @@ class MaxComputeClient:
                 "Please upgrade pyodps to enable STS token auto-refresh."
             )
         account = CredentialProviderAccount(credential_client)
-        client = ODPS(account=account, project=cfg.default_project, endpoint=endpoint,
-                      rest_client_kwargs={"user_agent": _FULL_USER_AGENT})
+        client = ODPS(
+            account=account,
+            project=cfg.default_project,
+            endpoint=endpoint,
+            rest_client_kwargs={"user_agent": _FULL_USER_AGENT},
+        )
         return MaxComputeClient(_client=client)
 
     @property

@@ -3,13 +3,17 @@
 Provides SecurityMixin with the check_access handler and related helpers
 for identity verification and permission querying.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from .mcp_protocol import mcp_ok_result, mcp_text_result
 from .tools_common import _unsupported, opt_arg
+
+if TYPE_CHECKING:
+    from .maxcompute_client import MaxComputeClient
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,14 @@ class SecurityMixin:
     Expects the host class to provide: maxcompute_client, default_project,
     _get_compute_client_for_project().
     """
+
+    if TYPE_CHECKING:
+        maxcompute_client: MaxComputeClient | None
+        default_project: str
+
+        def _get_compute_client_for_project(
+            self, project: str
+        ) -> MaxComputeClient | None: ...
 
     def _mask_access_key_id(self, ak_id: str) -> str:
         """Mask AccessKeyId for privacy, showing only first 4 and last 4 characters."""
@@ -48,7 +60,7 @@ class SecurityMixin:
         return name
 
     @staticmethod
-    def _normalize_effect_entries(entries: List[Any]) -> List[Any]:
+    def _normalize_effect_entries(entries: list[Any]) -> list[Any]:
         """Normalize Effect field in a list of ACL/Policy entries.
 
         Server returns empty string for Allow; replace with explicit "Allow" for clarity.
@@ -66,8 +78,8 @@ class SecurityMixin:
         return result
 
     def _format_grants_result(
-        self, raw: Dict[str, Any], odps_client: Any, project: str
-    ) -> Dict[str, Any]:
+        self, raw: dict[str, Any], odps_client: Any, project: str
+    ) -> dict[str, Any]:
         """Format raw SHOW GRANTS result:
         - Creator bare names → structured ARN entries with Action: All + Effect: Allow
         - Any dict[principal → list[entry]] field (ACL, Policy, Download, etc.):
@@ -86,7 +98,9 @@ class SecurityMixin:
                     if i < _MAX_CREATOR_ENRICHMENTS
                     else name
                 )
-                enriched.append({"Resource": resource, "Action": ["All"], "Effect": "Allow"})
+                enriched.append(
+                    {"Resource": resource, "Action": ["All"], "Effect": "Allow"}
+                )
             if len(creator_names) > _MAX_CREATOR_ENRICHMENTS:
                 logger.info(
                     "Skipped ARN enrichment for %d creator(s) beyond limit of %d",
@@ -112,7 +126,9 @@ class SecurityMixin:
 
         return formatted
 
-    def _build_identity_info(self, odps_client: Any, project: Optional[str]) -> Dict[str, Any]:
+    def _build_identity_info(
+        self, odps_client: Any, project: str | None
+    ) -> dict[str, Any]:
         """Build identity dict from account credentials and whoami result.
 
         Reads AK ID from the account object (masked) and, if a project is available,
@@ -126,7 +142,7 @@ class SecurityMixin:
             elif hasattr(account, "access_key_id"):
                 access_key_id = account.access_key_id or ""
 
-        identity: Dict[str, Any] = {
+        identity: dict[str, Any] = {
             "accessKeyId": self._mask_access_key_id(access_key_id),
             "defaultProject": self.default_project or odps_client.project or "",
             "endpoint": odps_client.endpoint or "",
@@ -134,20 +150,24 @@ class SecurityMixin:
 
         if project:
             try:
-                whoami_result = odps_client.run_security_query("whoami;", project=project)
+                whoami_result = odps_client.run_security_query(
+                    "whoami;", project=project
+                )
                 if isinstance(whoami_result, dict):
                     if "DisplayName" in whoami_result:
                         identity["displayName"] = whoami_result["DisplayName"]
                     if "ID" in whoami_result:
                         raw_id = str(whoami_result["ID"])
                         # Strip prefix before first underscore (e.g. "v4_1234567890xxxxxxxx" -> "1234567890xxxxxxxx")
-                        identity["id"] = raw_id.split("_", 1)[-1] if "_" in raw_id else raw_id
-            except Exception as whoami_err:
+                        identity["id"] = (
+                            raw_id.split("_", 1)[-1] if "_" in raw_id else raw_id
+                        )
+            except Exception as whoami_err:  # noqa: BLE001 -- optional provider query.
                 logger.warning("whoami query failed: %s", whoami_err)
 
         return identity
 
-    def _query_grants(self, project: str) -> Dict[str, Any]:
+    def _query_grants(self, project: str) -> dict[str, Any]:
         """Execute SHOW GRANTS for the current user in the given project.
 
         Raises RuntimeError if the compute client cannot be created.
@@ -166,10 +186,12 @@ class SecurityMixin:
             "result": self._format_grants_result(grants_result, odps, project),
         }
 
-    def check_access(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def check_access(self, args: dict[str, Any]) -> dict[str, Any]:
         """Check the identity and permissions of the current MCP MaxCompute access."""
         if not self.maxcompute_client:
-            return _unsupported("check_access requires MaxCompute compute engine configuration (default_project + sdk_endpoint).")
+            return _unsupported(
+                "check_access requires MaxCompute compute engine configuration (default_project + sdk_endpoint)."
+            )
 
         include_grants_raw = args.get("include_grants", True)
         if "include_grants" in args and not isinstance(include_grants_raw, bool):
@@ -182,16 +204,18 @@ class SecurityMixin:
 
         try:
             odps_client = self.maxcompute_client.odps_client
-            result: Dict[str, Any] = {
+            result: dict[str, Any] = {
                 "identity": self._build_identity_info(odps_client, project),
             }
 
             if include_grants:
                 if not project:
-                    return mcp_text_result({
-                        "success": False,
-                        "error": "'project' is required when include_grants=true. Specify a project or configure default_project.",
-                    })
+                    return mcp_text_result(
+                        {
+                            "success": False,
+                            "error": "'project' is required when include_grants=true. Specify a project or configure default_project.",
+                        }
+                    )
                 result["grants"] = self._query_grants(project)
 
             return mcp_ok_result(result)

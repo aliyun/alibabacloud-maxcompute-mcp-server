@@ -1,4 +1,5 @@
 """Unit tests for config.py — load_config(), resolve_catalogapi_endpoint_with_client(), and per-client protocol/endpoint resolver."""
+
 from __future__ import annotations
 
 import json
@@ -49,6 +50,43 @@ def test_config_repr_redacts_credentials() -> None:
     assert "fixture-access-key-secret" not in rendered
     assert "fixture-security-token" not in rendered
     assert "mc.example.com" in rendered
+
+
+@pytest.mark.parametrize(
+    ("maxcompute_endpoint", "expected_catalogapi_endpoint"),
+    [
+        (
+            "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+            "https://catalogapi.cn-hangzhou.maxcompute.aliyun.com",
+        ),
+        (
+            "https://service.ap-southeast-1-intranet.maxcompute.aliyun-inc.com/api",
+            "https://catalogapi.ap-southeast-1-intranet.maxcompute.aliyun-inc.com",
+        ),
+    ],
+)
+def test_standard_fe_derives_catalogapi_without_local_sdk(
+    tmp_path: Path,
+    maxcompute_endpoint: str,
+    expected_catalogapi_endpoint: str,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "maxcompute_endpoint": maxcompute_endpoint,
+                    "accessKeyId": "fixture-ak",
+                    "accessKeySecret": "fixture-sk",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(str(config_path))
+
+    assert config.catalogapi_endpoint == expected_catalogapi_endpoint
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +143,9 @@ class TestResolverMaxComputeChain:
         assert r.maxcompute_url == "http://mc.example.com/api"
 
     def test_default_https_when_nothing_set(self):
-        r = resolve_protocol_and_endpoints(_cfg(maxcompute_endpoint="mc.example.com/api"))
+        r = resolve_protocol_and_endpoints(
+            _cfg(maxcompute_endpoint="mc.example.com/api")
+        )
         assert r.maxcompute_protocol == "https"
         assert r.maxcompute_url == "https://mc.example.com/api"
 
@@ -249,17 +289,21 @@ class TestLoadConfigProtocol:
 def test_load_config_from_json_file(tmp_path: Path) -> None:
     """Load config from a JSON file with 'maxcompute' key."""
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "maxcompute": {
-            "catalogapi_endpoint": "https://catalog.example.com",
-            "maxcompute_endpoint": "https://mc.example.com",
-            "accessKeyId": "AK_ID",
-            "accessKeySecret": "AK_SECRET",
-            "securityToken": "TOKEN",
-            "defaultProject": "proj1",
-            "namespaceId": "ns123",
-        }
-    }))
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "catalogapi_endpoint": "https://catalog.example.com",
+                    "maxcompute_endpoint": "https://mc.example.com",
+                    "accessKeyId": "AK_ID",
+                    "accessKeySecret": "AK_SECRET",
+                    "securityToken": "TOKEN",
+                    "defaultProject": "proj1",
+                    "namespaceId": "ns123",
+                }
+            }
+        )
+    )
     cfg = load_config(str(cfg_file))
     assert cfg.catalogapi_endpoint == "https://catalog.example.com"
     assert cfg.maxcompute_endpoint == "https://mc.example.com"
@@ -273,29 +317,39 @@ def test_load_config_from_json_file(tmp_path: Path) -> None:
 def test_load_config_from_odps_key(tmp_path: Path) -> None:
     """Load config from a JSON file with 'odps' key instead of 'maxcompute'."""
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "odps": {
-            "maxcompute_endpoint": "https://mc.example.com",
-            "access_key_id": "AK",
-            "access_key_secret": "SK",
-        }
-    }))
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "odps": {
+                    "maxcompute_endpoint": "https://mc.example.com",
+                    "access_key_id": "AK",
+                    "access_key_secret": "SK",
+                }
+            }
+        )
+    )
     cfg = load_config(str(cfg_file))
     assert cfg.maxcompute_endpoint == "https://mc.example.com"
     assert cfg.access_key_id == "AK"
     assert cfg.access_key_secret == "SK"
 
 
-def test_load_config_env_overrides_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_env_overrides_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Environment variables override file values."""
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "maxcompute": {
-            "maxcompute_endpoint": "https://file.example.com",
-            "accessKeyId": "FILE_AK",
-            "accessKeySecret": "FILE_SK",
-        }
-    }))
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "maxcompute_endpoint": "https://file.example.com",
+                    "accessKeyId": "FILE_AK",
+                    "accessKeySecret": "FILE_SK",
+                }
+            }
+        )
+    )
     monkeypatch.setenv("MAXCOMPUTE_ENDPOINT", "https://env.example.com")
     monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "ENV_AK")
     monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "ENV_SK")
@@ -452,7 +506,9 @@ def test_simple_config_rejects_invalid_region(tmp_path: Path) -> None:
         load_config(str(cfg_file))
 
 
-def test_load_config_no_file_env_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_no_file_env_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Load config without file, env-only."""
     # Point to a non-existent file
     monkeypatch.setenv("MAXCOMPUTE_ENDPOINT", "https://mc.example.com")
@@ -468,16 +524,20 @@ def test_load_config_no_file_env_only(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_load_config_alias_fields(tmp_path: Path) -> None:
     """Verify alias field names work (catalogapiEndpoint, sdkEndpoint, etc.)."""
     cfg_file = tmp_path / "config.json"
-    cfg_file.write_text(json.dumps({
-        "maxcompute": {
-            "catalogapiEndpoint": "https://cat.example.com",
-            "sdkEndpoint": "https://sdk.example.com",
-            "accessKeyId": "AK1",
-            "accessKeySecret": "SK1",
-            "defaultProject": "proj_alias",
-            "namespaceId": "ns_alias",
-        }
-    }))
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "catalogapiEndpoint": "https://cat.example.com",
+                    "sdkEndpoint": "https://sdk.example.com",
+                    "accessKeyId": "AK1",
+                    "accessKeySecret": "SK1",
+                    "defaultProject": "proj_alias",
+                    "namespaceId": "ns_alias",
+                }
+            }
+        )
+    )
     cfg = load_config(str(cfg_file))
     assert cfg.catalogapi_endpoint == "https://cat.example.com"
     assert cfg.maxcompute_endpoint == "https://sdk.example.com"
@@ -485,7 +545,9 @@ def test_load_config_alias_fields(tmp_path: Path) -> None:
     assert cfg.namespace_id == "ns_alias"
 
 
-def test_load_config_empty_json_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_empty_json_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Empty JSON file ({}) — env must still provide required fields."""
     cfg_file = tmp_path / "config.json"
     cfg_file.write_text("{}")
@@ -508,7 +570,9 @@ def test_resolve_endpoint_success() -> None:
     client.rest.get.return_value = resp
     result = resolve_catalogapi_endpoint_with_client(client, "https://mc.example.com")
     assert result == "https://catalog-resolved.example.com"
-    client.rest.get.assert_called_once_with("https://mc.example.com/catalogapi", timeout=10.0)
+    client.rest.get.assert_called_once_with(
+        "https://mc.example.com/catalogapi", timeout=10.0
+    )
 
 
 def test_resolve_endpoint_empty_maxcompute_endpoint() -> None:
@@ -525,7 +589,9 @@ def test_resolve_endpoint_strips_trailing_slash() -> None:
     resp.text = "resolved"
     client.rest.get.return_value = resp
     resolve_catalogapi_endpoint_with_client(client, "https://mc.example.com/")
-    client.rest.get.assert_called_once_with("https://mc.example.com/catalogapi", timeout=10.0)
+    client.rest.get.assert_called_once_with(
+        "https://mc.example.com/catalogapi", timeout=10.0
+    )
 
 
 def test_resolve_endpoint_network_error() -> None:
@@ -608,20 +674,28 @@ class TestLoadConfigs:
 
     def test_multi_named_configs(self, tmp_path: Path) -> None:
         p = tmp_path / "config.json"
-        p.write_text(json.dumps({
-            "default": "hz",
-            "configs": {
-                "hz": {
-                    "region": "cn-hangzhou", "description": "HZ",
-                    "maxcompute_endpoint": "https://hz.example.com",
-                    "accessKeyId": "AK1", "accessKeySecret": "SK1", "defaultProject": "p1",
-                },
-                "sg": {
-                    "maxcompute_endpoint": "https://sg.example.com",
-                    "accessKeyId": "AK2", "accessKeySecret": "SK2",
-                },
-            },
-        }))
+        p.write_text(
+            json.dumps(
+                {
+                    "default": "hz",
+                    "configs": {
+                        "hz": {
+                            "region": "cn-hangzhou",
+                            "description": "HZ",
+                            "maxcompute_endpoint": "https://hz.example.com",
+                            "accessKeyId": "AK1",
+                            "accessKeySecret": "SK1",
+                            "defaultProject": "p1",
+                        },
+                        "sg": {
+                            "maxcompute_endpoint": "https://sg.example.com",
+                            "accessKeyId": "AK2",
+                            "accessKeySecret": "SK2",
+                        },
+                    },
+                }
+            )
+        )
         configs, default_name = load_configs(str(p))
         assert default_name == "hz"
         assert set(configs) == {"hz", "sg"}
@@ -634,21 +708,29 @@ class TestLoadConfigs:
 
     def test_default_falls_back_to_first_key(self, tmp_path: Path) -> None:
         p = tmp_path / "config.json"
-        p.write_text(json.dumps({
-            "configs": {
-                "a": {"maxcompute_endpoint": "https://a.example.com"},
-                "b": {"maxcompute_endpoint": "https://b.example.com"},
-            },
-        }))
+        p.write_text(
+            json.dumps(
+                {
+                    "configs": {
+                        "a": {"maxcompute_endpoint": "https://a.example.com"},
+                        "b": {"maxcompute_endpoint": "https://b.example.com"},
+                    },
+                }
+            )
+        )
         _, default_name = load_configs(str(p))
         assert default_name == "a"
 
     def test_default_not_in_configs_raises(self, tmp_path: Path) -> None:
         p = tmp_path / "config.json"
-        p.write_text(json.dumps({
-            "default": "nope",
-            "configs": {"a": {"maxcompute_endpoint": "https://a.example.com"}},
-        }))
+        p.write_text(
+            json.dumps(
+                {
+                    "default": "nope",
+                    "configs": {"a": {"maxcompute_endpoint": "https://a.example.com"}},
+                }
+            )
+        )
         with pytest.raises(ValueError, match="default config"):
             load_configs(str(p))
 
@@ -658,29 +740,51 @@ class TestLoadConfigs:
         with pytest.raises(ValueError, match="invalid named config 'a'"):
             load_configs(str(p))
 
+    def test_bundle_must_be_an_object(self, tmp_path: Path) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(json.dumps({"configs": {"a": "not-an-object"}}))
+
+        with pytest.raises(TypeError, match="config 'a' must be an object"):
+            load_configs(str(p))
+
     def test_bundle_invalid_protocol_raises(self, tmp_path: Path) -> None:
         p = tmp_path / "config.json"
-        p.write_text(json.dumps({
-            "configs": {"a": {"maxcompute_endpoint": "https://a", "protocol": "ftp"}},
-        }))
+        p.write_text(
+            json.dumps(
+                {
+                    "configs": {
+                        "a": {"maxcompute_endpoint": "https://a", "protocol": "ftp"}
+                    },
+                }
+            )
+        )
         with pytest.raises(ValueError, match="invalid named config 'a'"):
             load_configs(str(p))
 
-    def test_backward_compat_single_maxcompute(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_backward_compat_single_maxcompute(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("MAXCOMPUTE_PROTOCOL", raising=False)
         p = tmp_path / "config.json"
-        p.write_text(json.dumps({
-            "maxcompute": {
-                "maxcompute_endpoint": "https://mc.example.com",
-                "accessKeyId": "AK", "accessKeySecret": "SK",
-            },
-        }))
+        p.write_text(
+            json.dumps(
+                {
+                    "maxcompute": {
+                        "maxcompute_endpoint": "https://mc.example.com",
+                        "accessKeyId": "AK",
+                        "accessKeySecret": "SK",
+                    },
+                }
+            )
+        )
         configs, default_name = load_configs(str(p))
         assert default_name == "default"
         assert list(configs) == ["default"]
         assert configs["default"].maxcompute_endpoint == "https://mc.example.com"
 
-    def test_backward_compat_env_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_backward_compat_env_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("MAXCOMPUTE_ENDPOINT", "https://env.example.com")
         configs, default_name = load_configs(str(tmp_path / "nonexistent.json"))
         assert default_name == "default"

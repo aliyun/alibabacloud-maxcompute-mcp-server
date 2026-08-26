@@ -2,13 +2,15 @@
 
 Contains ToolSpec, argument helpers, SQL safety checking, and common formatting.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any
 
 from .mcp_protocol import JsonRpcError, mcp_text_result
 
@@ -47,12 +49,33 @@ def _escape_identifier(name: str) -> str:
 # SET statements within the SQL body can override session parameters, including the
 # server-side odps.sql.read.only=true hint.  Users who need to set runtime parameters
 # should use the `hints` parameter instead.
-_UNSAFE_SQL_KEYWORDS = frozenset([
-    "INSERT", "UPDATE", "DELETE", "MERGE", "UPSERT", "TRUNCATE",
-    "CREATE", "DROP", "ALTER", "RENAME", "GRANT", "REVOKE",
-    "CALL", "EXEC", "EXECUTE", "LOAD", "UNLOAD", "COPY", "MSCK", "REPAIR",
-])
-_ALLOWED_SQL_PREFIXES = frozenset(["SELECT", "WITH", "SHOW", "DESC", "DESCRIBE", "EXPLAIN", "VALUES"])
+_UNSAFE_SQL_KEYWORDS = frozenset(
+    [
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "MERGE",
+        "UPSERT",
+        "TRUNCATE",
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "RENAME",
+        "GRANT",
+        "REVOKE",
+        "CALL",
+        "EXEC",
+        "EXECUTE",
+        "LOAD",
+        "UNLOAD",
+        "COPY",
+        "MSCK",
+        "REPAIR",
+    ]
+)
+_ALLOWED_SQL_PREFIXES = frozenset(
+    ["SELECT", "WITH", "SHOW", "DESC", "DESCRIBE", "EXPLAIN", "VALUES"]
+)
 
 # Pre-compiled patterns for SQL normalization and safety checks
 _SQL_LINE_COMMENT = re.compile(r"--[^\n]*")
@@ -105,7 +128,7 @@ def _normalize_sql(sql: str) -> str:
     return " ".join(s.split()).upper()
 
 
-def _is_read_only_sql(sql: str) -> tuple[bool, Optional[str]]:
+def _is_read_only_sql(sql: str) -> tuple[bool, str | None]:
     """Best-effort check whether *sql* is read-only.
 
     Returns (is_safe, error_message).
@@ -142,7 +165,7 @@ def _is_read_only_sql(sql: str) -> tuple[bool, Optional[str]]:
             # String literals were already stripped by _normalize_sql, so
             # keyword matching here only sees SQL syntax, not user data.
             if first == "WITH":
-                body = stmt[len("WITH"):]
+                body = stmt[len("WITH") :]
                 for kw, pattern in _UNSAFE_KW_PATTERNS.items():
                     if pattern.search(body):
                         return False, f"Unsafe SQL operation detected in CTE body: {kw}"
@@ -159,45 +182,47 @@ def _is_read_only_sql(sql: str) -> tuple[bool, Optional[str]]:
 class ToolSpec:
     name: str
     description: str
-    input_schema: Dict[str, Any]
+    input_schema: dict[str, Any]
 
 
-def string_prop(description: str, default: Optional[str] = None) -> Dict[str, Any]:
-    d: Dict[str, Any] = {"type": "string", "description": description}
+def string_prop(description: str, default: str | None = None) -> dict[str, Any]:
+    d: dict[str, Any] = {"type": "string", "description": description}
     if default is not None:
         d["default"] = default
     return d
 
 
-def int_prop(description: str, default: Optional[int] = None) -> Dict[str, Any]:
-    d: Dict[str, Any] = {"type": "integer", "description": description}
+def int_prop(description: str, default: int | None = None) -> dict[str, Any]:
+    d: dict[str, Any] = {"type": "integer", "description": description}
     if default is not None:
         d["default"] = default
     return d
 
 
-def input_schema(properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
-    schema: Dict[str, Any] = {"type": "object", "properties": properties}
+def input_schema(
+    properties: dict[str, Any], required: list[str] | None = None
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
     return schema
 
 
-def require_arg(args: Dict[str, Any], key: str, msg: str) -> str:
+def require_arg(args: dict[str, Any], key: str, msg: str) -> str:
     v = args.get(key)
     if v is None or str(v).strip() == "":
         raise JsonRpcError(-32602, "Invalid params", msg)
     return str(v)
 
 
-def opt_arg(args: Dict[str, Any], key: str, default: Optional[str] = None) -> Optional[str]:
+def opt_arg(args: dict[str, Any], key: str, default: str | None = None) -> str | None:
     v = args.get(key, default)
     if v is None:
         return None
     return str(v)
 
 
-def opt_int(args: Dict[str, Any], key: str, default: int) -> int:
+def opt_int(args: dict[str, Any], key: str, default: int) -> int:
     v = args.get(key, default)
     try:
         return int(v)
@@ -205,21 +230,25 @@ def opt_int(args: Dict[str, Any], key: str, default: int) -> int:
         return default
 
 
-def parse_timeout(args: Dict[str, Any], default: int) -> int:
+def parse_timeout(args: dict[str, Any], default: int) -> int:
     """Parse timeout from args. Raises ValueError on invalid or non-positive value."""
     raw = args.get("timeout")
     if raw is not None:
         try:
             val = int(raw)
         except (TypeError, ValueError):
-            raise ValueError(f"Invalid timeout value {raw!r}; must be a positive integer.")
+            raise ValueError(
+                f"Invalid timeout value {raw!r}; must be a positive integer."
+            )
         if val <= 0:
-            raise ValueError(f"Invalid timeout value {val}; must be a positive integer.")
+            raise ValueError(
+                f"Invalid timeout value {val}; must be a positive integer."
+            )
         return val
     return default
 
 
-def parse_bool(args: Dict[str, Any], key: str, default: bool) -> bool:
+def parse_bool(args: dict[str, Any], key: str, default: bool) -> bool:
     """Parse a boolean arg. Raises TypeError if the value is not a bool.
 
     Note: bool("false") == True in Python, so strict type checking is required
@@ -239,23 +268,27 @@ def _build_timeout_response(
     timeout_secs: int,
     operation: str,
     detail: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a standard timeout error response."""
-    return mcp_text_result({
-        "success": False,
-        "timeout": True,
-        "instanceId": inst.id,
-        "project": project,
-        "message": (
-            f"{operation} timed out after {timeout_secs}s{detail}. "
-            "Use get_instance_status or get_instance with instanceId to poll for results."
-        ),
-    })
+    return mcp_text_result(
+        {
+            "success": False,
+            "timeout": True,
+            "instanceId": inst.id,
+            "project": project,
+            "message": (
+                f"{operation} timed out after {timeout_secs}s{detail}. "
+                "Use get_instance_status or get_instance with instanceId to poll for results."
+            ),
+        }
+    )
 
 
-def _unsupported(reason: str) -> Dict[str, Any]:
+def _unsupported(reason: str) -> dict[str, Any]:
     """Return a uniform 'unsupported' result for client/agent to recognize."""
-    return mcp_text_result({"success": False, "error": "unsupported", "message": reason})
+    return mcp_text_result(
+        {"success": False, "error": "unsupported", "message": reason}
+    )
 
 
 # Pre-compiled regex for DATE pattern matching (avoid recompilation on each call)
@@ -300,4 +333,4 @@ def _quote_partition_literal(v: Any) -> str:
     return f"'{s}'"
 
 
-ToolHandler = Callable[[Dict[str, Any]], Dict[str, Any]]
+ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]

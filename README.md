@@ -82,7 +82,10 @@ The launcher needs:
 
 - Python 3.10 or newer.
 - [`uv`](https://docs.astral.sh/uv/) for dependency management (recommended).
-- Local mode and the local remote proxy both need MaxCompute access through an
+- The base installation supports the default remote proxy without PyODPS or
+  PyArrow. Local SDK mode uses the optional `local` dependency set; its secure
+  PyArrow wheel requires glibc 2.28+ or musl 1.2+ on Linux.
+- Remote and local modes both need MaxCompute access through an
   AccessKey, STS credentials, a credentials URI, ECS RAM Role, or another
   supported default-credential-chain source.
 - The remote proxy obtains a 300-second `mcpc_` token through the standard
@@ -99,6 +102,19 @@ python -m pip install alibabacloud-maxcompute-mcp-server
 # or install the command in an isolated environment
 uv tool install alibabacloud-maxcompute-mcp-server
 ```
+
+The base package is intentionally remote-first and does not install PyODPS or
+PyArrow. Install the local SDK implementation only when it is needed:
+
+```bash
+python -m pip install "alibabacloud-maxcompute-mcp-server[local]"
+# or
+uv tool install "alibabacloud-maxcompute-mcp-server[local]"
+```
+
+With the base package, `default` still tries remote first. If remote
+initialization fails, the local fallback reports the command above instead of
+silently running without its SDK dependencies.
 
 Verify the installed entry point:
 

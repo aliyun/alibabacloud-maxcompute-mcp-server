@@ -1,4 +1,5 @@
 """Unit tests for tools_security.py — SecurityMixin helpers and check_access handler."""
+
 from __future__ import annotations
 
 import logging
@@ -8,12 +9,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from maxcompute_catalog_mcp.tools import Tools
-from tests.conftest import data as _data, text_payload as _text_payload
-
+from tests.conftest import data as _data
+from tests.conftest import text_payload as _text_payload
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_security_tools(
     *,
@@ -58,6 +60,7 @@ def _make_security_tools(
 # 2.1 Helper method tests
 # ---------------------------------------------------------------------------
 
+
 class TestMaskAccessKeyId:
     def test_normal(self) -> None:
         t = _make_security_tools()
@@ -99,11 +102,13 @@ class TestNormalizeEffectEntries:
 
     def test_mixed(self) -> None:
         t = _make_security_tools()
-        result = t._normalize_effect_entries([
-            {"Effect": ""},
-            "marker",
-            {"Effect": "Deny"},
-        ])
+        result = t._normalize_effect_entries(
+            [
+                {"Effect": ""},
+                "marker",
+                {"Effect": "Deny"},
+            ]
+        )
         assert result == [
             {"Effect": "Allow"},
             "marker",
@@ -112,7 +117,9 @@ class TestNormalizeEffectEntries:
 
 
 class TestEnrichCreatorArn:
-    def _make_odps(self, *, table: bool = False, resource: bool = False, function: bool = False) -> MagicMock:
+    def _make_odps(
+        self, *, table: bool = False, resource: bool = False, function: bool = False
+    ) -> MagicMock:
         odps = MagicMock()
         odps.exist_table.return_value = table
         odps.exist_resource.return_value = resource
@@ -148,6 +155,7 @@ class TestEnrichCreatorArn:
 # 2.2 _format_grants_result() tests
 # ---------------------------------------------------------------------------
 
+
 class TestFormatGrantsResult:
     def test_with_creator(self) -> None:
         t = _make_security_tools()
@@ -163,6 +171,7 @@ class TestFormatGrantsResult:
 
     def test_creator_over_max_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import maxcompute_catalog_mcp.tools_security as ts
+
         monkeypatch.setattr(ts, "_MAX_CREATOR_ENRICHMENTS", 2)
         t = _make_security_tools()
         odps = MagicMock()
@@ -178,7 +187,10 @@ class TestFormatGrantsResult:
         t = _make_security_tools()
         raw = {
             "ACL": {
-                "user1": [{"Effect": "", "Action": "Read"}, {"Effect": "Deny", "Action": "Write"}]
+                "user1": [
+                    {"Effect": "", "Action": "Read"},
+                    {"Effect": "Deny", "Action": "Write"},
+                ]
             }
         }
         result = t._format_grants_result(raw, MagicMock(), "p1")
@@ -196,6 +208,7 @@ class TestFormatGrantsResult:
 # ---------------------------------------------------------------------------
 # 2.3 _build_identity_info() tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildIdentityInfo:
     def test_with_access_id(self) -> None:
@@ -224,7 +237,10 @@ class TestBuildIdentityInfo:
         odps.account = None
         odps.project = "p1"
         odps.endpoint = "https://mc.example.com"
-        odps.run_security_query.return_value = {"DisplayName": "TestUser", "ID": "v4_123456"}
+        odps.run_security_query.return_value = {
+            "DisplayName": "TestUser",
+            "ID": "v4_123456",
+        }
         identity = t._build_identity_info(odps, "p1")
         assert identity["displayName"] == "TestUser"
         assert identity["id"] == "123456"
@@ -248,7 +264,10 @@ class TestBuildIdentityInfo:
         odps.account = None
         odps.project = "p1"
         odps.endpoint = "https://mc.example.com"
-        odps.run_security_query.return_value = {"DisplayName": "User", "ID": "plain_id_no_underscore"}
+        odps.run_security_query.return_value = {
+            "DisplayName": "User",
+            "ID": "plain_id_no_underscore",
+        }
         identity = t._build_identity_info(odps, "p1")
         # "plain_id_no_underscore" contains underscore -> split on first _
         assert identity["id"] == "id_no_underscore"
@@ -267,6 +286,7 @@ class TestBuildIdentityInfo:
 # ---------------------------------------------------------------------------
 # 2.4 check_access() full flow tests
 # ---------------------------------------------------------------------------
+
 
 class TestCheckAccess:
     def test_no_compute_returns_unsupported(self) -> None:
@@ -306,7 +326,9 @@ class TestCheckAccess:
         assert payload.get("success") is False
         assert "project" in str(payload.get("error", "")).lower()
 
-    def test_include_grants_non_bool_coercion(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_include_grants_non_bool_coercion(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Non-bool include_grants triggers a warning log."""
         t = _make_security_tools()
         with caplog.at_level(logging.WARNING):
@@ -330,6 +352,7 @@ class TestCheckAccess:
 # 2.5 _query_grants() tests
 # ---------------------------------------------------------------------------
 
+
 class TestQueryGrants:
     def test_success(self) -> None:
         t = _make_security_tools()
@@ -348,6 +371,7 @@ class TestQueryGrants:
 # 3. check_access error paths (unit tests, no real config needed)
 # ---------------------------------------------------------------------------
 
+
 class TestCheckAccessNoProjectGrantsError:
     """check_access: include_grants=True with no project (and no default_project) must error."""
 
@@ -362,9 +386,12 @@ class TestCheckAccessNoProjectGrantsError:
             namespace_id="test_namespace_id",
             maxcompute_client=mock_maxcompute_client,
         )
-        r = tools.call("check_access", {
-            "include_grants": True,
-        })
+        r = tools.call(
+            "check_access",
+            {
+                "include_grants": True,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, (
             f"check_access with include_grants=True and no project must fail, got: {payload}"
@@ -378,21 +405,24 @@ class TestCheckAccessNoProjectGrantsError:
 class TestCheckAccessNoComputeClient:
     """check_access: no compute client must return descriptive error."""
 
-    def test_check_access_no_compute_client(
-        self, tools_no_compute: Tools
-    ) -> None:
+    def test_check_access_no_compute_client(self, tools_no_compute: Tools) -> None:
         """tools_no_compute has no maxcompute_client; check_access must fail gracefully."""
-        r = tools_no_compute.call("check_access", {
-            "project": "any_project",
-            "include_grants": False,
-        })
+        r = tools_no_compute.call(
+            "check_access",
+            {
+                "project": "any_project",
+                "include_grants": False,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, (
             f"check_access without compute client must fail, got: {payload}"
         )
         error_msg = payload.get("error") or ""
         message = payload.get("message") or ""
-        assert error_msg or message, "Expected non-empty error message when no compute client"
+        assert error_msg or message, (
+            "Expected non-empty error message when no compute client"
+        )
         # _unsupported() returns error='unsupported' and message=<reason>
         combined = f"{error_msg} {message}".lower()
         assert (

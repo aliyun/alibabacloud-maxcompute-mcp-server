@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import anyio
 import httpx2 as httpx
-import pytest
 from mcp import types as mcp_types
 from mcp.shared.message import SessionMessage
 
@@ -100,13 +99,17 @@ def test_remote_proxy_uses_exact_hardened_http_client_and_relay_wiring() -> None
             ),
             "mcp.server.stdio": MagicMock(stdio_server=fake_stdio_server),
         }
-        with patch(
-            "maxcompute_catalog_mcp.remote_proxy.httpx.AsyncClient",
-            async_client_factory,
-        ), patch(
-            "maxcompute_catalog_mcp.remote_proxy.relay_bidirectional",
-            relay_mock,
-        ), patch.dict(sys.modules, fake_modules):
+        with (
+            patch(
+                "maxcompute_catalog_mcp.remote_proxy.httpx.AsyncClient",
+                async_client_factory,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.remote_proxy.relay_bidirectional",
+                relay_mock,
+            ),
+            patch.dict(sys.modules, fake_modules),
+        ):
             await _run_remote_proxy_with_provider(config, provider)
 
         async_client_factory.assert_called_once()
@@ -273,14 +276,17 @@ def test_streamable_http_400_jsonrpc_error_returns_without_timeout() -> None:
                 },
             )
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler),
-            follow_redirects=False,
-            trust_env=False,
-        ) as client, streamable_http_client(
-            "https://gateway.example.com/mcp",
-            http_client=client,
-        ) as (read_stream, write_stream):
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.MockTransport(handler),
+                follow_redirects=False,
+                trust_env=False,
+            ) as client,
+            streamable_http_client(
+                "https://gateway.example.com/mcp",
+                http_client=client,
+            ) as (read_stream, write_stream),
+        ):
             request = mcp_types.JSONRPCRequest(
                 jsonrpc="2.0",
                 id=1,
@@ -292,9 +298,7 @@ def test_streamable_http_400_jsonrpc_error_returns_without_timeout() -> None:
                 },
             )
             await write_stream.send(
-                ProtocolMetadataBridge().prepare_outbound(
-                    SessionMessage(request)
-                )
+                ProtocolMetadataBridge().prepare_outbound(SessionMessage(request))
             )
             with anyio.fail_after(1):
                 received = await read_stream.receive()

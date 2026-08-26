@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """E2E tests: tools_security coverage gap fillers.
 
 Targets the 36 uncovered lines in tools_security.py (E2E coverage was 64%).
@@ -17,6 +16,7 @@ All tests avoid logging or asserting on environment-specific values
 
 Requires config.json (or MAXCOMPUTE_CATALOG_CONFIG env var).
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,8 +27,9 @@ import pytest
 
 from maxcompute_catalog_mcp.tools import Tools
 from tests.conftest import (
-    _get_tools_class,
     has_config as _has_config,
+)
+from tests.conftest import (
     text_payload as _text_payload,
 )
 
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 1. check_access with grants — structure validation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestCheckAccessGrantsStructure:
@@ -53,25 +55,36 @@ class TestCheckAccessGrantsStructure:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("check_access", {
-            "project": project,
-            "include_grants": True,
-        })
+        r = real_tools.call(
+            "check_access",
+            {
+                "project": project,
+                "include_grants": True,
+            },
+        )
         payload = _text_payload(r)
         if payload.get("success") is False:
-            pytest.skip(f"SHOW GRANTS not available in this environment: {payload.get('error')}")
+            pytest.skip(
+                f"SHOW GRANTS not available in this environment: {payload.get('error')}"
+            )
         actual = payload.get("data") or payload
         grants = actual.get("grants")
         if grants is None:
             pytest.skip("grants not returned (may lack permission)")
         return grants
 
-    def test_grants_contains_project_key(self, real_tools: Tools, real_config: Any) -> None:
+    def test_grants_contains_project_key(
+        self, real_tools: Tools, real_config: Any
+    ) -> None:
         """Grants result must contain 'project' key."""
         grants = self._get_grants(real_tools, real_config)
-        assert "project" in grants, f"grants missing 'project' key: {list(grants.keys())}"
+        assert "project" in grants, (
+            f"grants missing 'project' key: {list(grants.keys())}"
+        )
 
-    def test_grants_contains_result_key(self, real_tools: Tools, real_config: Any) -> None:
+    def test_grants_contains_result_key(
+        self, real_tools: Tools, real_config: Any
+    ) -> None:
         """Grants result must contain 'result' key with formatted grants data."""
         grants = self._get_grants(real_tools, real_config)
         assert "result" in grants, f"grants missing 'result' key: {list(grants.keys())}"
@@ -80,7 +93,9 @@ class TestCheckAccessGrantsStructure:
         """Grants result field must be a dict."""
         grants = self._get_grants(real_tools, real_config)
         result = grants.get("result", {})
-        assert isinstance(result, dict), f"grants.result must be dict, got: {type(result)}"
+        assert isinstance(result, dict), (
+            f"grants.result must be dict, got: {type(result)}"
+        )
 
     def test_grants_creator_entries_structure(
         self, real_tools: Tools, real_config: Any
@@ -98,7 +113,9 @@ class TestCheckAccessGrantsStructure:
             # Real Creator entries from SHOW GRANTS — validate structure
             for entry in creator:
                 if isinstance(entry, dict):
-                    assert "Resource" in entry, f"Creator entry missing Resource: {entry}"
+                    assert "Resource" in entry, (
+                        f"Creator entry missing Resource: {entry}"
+                    )
                     assert "Action" in entry, f"Creator entry missing Action: {entry}"
                     assert "Effect" in entry, f"Creator entry missing Effect: {entry}"
                     assert entry["Effect"] == "Allow", (
@@ -120,10 +137,14 @@ class TestCheckAccessGrantsStructure:
             )
             assert len(creator_entries) >= 1, "Should have at least one Creator entry"
             entry = creator_entries[0]
-            assert isinstance(entry, dict), f"Creator entry should be dict, got: {type(entry)}"
+            assert isinstance(entry, dict), (
+                f"Creator entry should be dict, got: {type(entry)}"
+            )
             assert "Resource" in entry, f"Creator entry missing Resource: {entry}"
             assert "Action" in entry, f"Creator entry missing Action: {entry}"
-            assert entry["Action"] == ["All"], f"Creator Action should be ['All']: {entry}"
+            assert entry["Action"] == ["All"], (
+                f"Creator Action should be ['All']: {entry}"
+            )
             assert "Effect" in entry, f"Creator entry missing Effect: {entry}"
             assert entry["Effect"] == "Allow", (
                 f"Creator entry Effect must be 'Allow': {entry}"
@@ -161,6 +182,7 @@ class TestCheckAccessGrantsStructure:
 # 2. check_access identity: whoami fields
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestCheckAccessIdentityWhoami:
     """check_access identity: displayName and id from whoami."""
@@ -172,10 +194,13 @@ class TestCheckAccessIdentityWhoami:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("check_access", {
-            "project": project,
-            "include_grants": False,
-        })
+        r = real_tools.call(
+            "check_access",
+            {
+                "project": project,
+                "include_grants": False,
+            },
+        )
         payload = _text_payload(r)
         actual = payload.get("data") or payload
         identity = actual.get("identity") or {}
@@ -195,18 +220,19 @@ class TestCheckAccessIdentityWhoami:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("check_access", {
-            "project": project,
-            "include_grants": False,
-        })
+        r = real_tools.call(
+            "check_access",
+            {
+                "project": project,
+                "include_grants": False,
+            },
+        )
         payload = _text_payload(r)
         actual = payload.get("data") or payload
         identity = actual.get("identity") or {}
         user_id = identity.get("id")
         if user_id is not None:
-            assert isinstance(user_id, str), (
-                f"id must be str, got: {type(user_id)}"
-            )
+            assert isinstance(user_id, str), f"id must be str, got: {type(user_id)}"
             # id should have prefix stripped (e.g. "v4_xxx" -> "xxx")
             # We just verify it's not empty
             assert len(user_id) > 0, "id should not be empty if present"
@@ -215,6 +241,7 @@ class TestCheckAccessIdentityWhoami:
 # ---------------------------------------------------------------------------
 # 3. include_grants string coercion
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestCheckAccessGrantsCoercion:
@@ -227,10 +254,13 @@ class TestCheckAccessGrantsCoercion:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("check_access", {
-            "project": project,
-            "include_grants": "true",
-        })
+        r = real_tools.call(
+            "check_access",
+            {
+                "project": project,
+                "include_grants": "true",
+            },
+        )
         payload = _text_payload(r)
         # The call should not crash; bool('true') = True, so grants should be attempted
         # It may succeed (grants present) or fail (permissions), but not error on type
@@ -252,10 +282,13 @@ class TestCheckAccessGrantsCoercion:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("check_access", {
-            "project": project,
-            "include_grants": "false",
-        })
+        r = real_tools.call(
+            "check_access",
+            {
+                "project": project,
+                "include_grants": "false",
+            },
+        )
         payload = _text_payload(r)
         # Should not crash; bool('false') = True, so grants will be attempted
         if payload.get("success") is False:
@@ -269,18 +302,21 @@ class TestCheckAccessGrantsCoercion:
 # 4. _mask_access_key_id edge cases (unit test, no env info leaked)
 # ---------------------------------------------------------------------------
 
+
 class TestMaskAccessKeyIdUnit:
     """Unit tests for _mask_access_key_id edge cases."""
 
     def test_mask_empty_string(self) -> None:
         """Empty string should return empty string."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         assert mixin._mask_access_key_id("") == ""
 
     def test_mask_short_key(self) -> None:
         """Key <= 8 chars should show first 2 + *** + last 2."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         result = mixin._mask_access_key_id("abcd")
         assert "***" in result
@@ -290,6 +326,7 @@ class TestMaskAccessKeyIdUnit:
     def test_mask_long_key(self) -> None:
         """Key > 8 chars should show first 4 + *** + last 4."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         result = mixin._mask_access_key_id("LTAI_abcdefgh1234")
         assert "***" in result
@@ -301,6 +338,7 @@ class TestMaskAccessKeyIdUnit:
     def test_mask_exactly_8_chars(self) -> None:
         """Key exactly 8 chars uses the short-key branch."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         result = mixin._mask_access_key_id("abcdefgh")
         assert "***" in result
@@ -310,54 +348,67 @@ class TestMaskAccessKeyIdUnit:
 # 5. _normalize_effect_entries unit tests (no env info leaked)
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeEffectEntriesUnit:
     """Unit tests for _normalize_effect_entries."""
 
     def test_empty_effect_becomes_allow(self) -> None:
         """Effect: '' should be normalized to 'Allow'."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
-        result = SecurityMixin._normalize_effect_entries([
-            {"Effect": "", "Action": ["Read"], "Resource": "acs:odps:*:*"},
-        ])
+
+        result = SecurityMixin._normalize_effect_entries(
+            [
+                {"Effect": "", "Action": ["Read"], "Resource": "acs:odps:*:*"},
+            ]
+        )
         assert len(result) == 1
         assert result[0]["Effect"] == "Allow"
 
     def test_non_empty_effect_preserved(self) -> None:
         """Effect: 'Deny' should be preserved as-is."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
-        result = SecurityMixin._normalize_effect_entries([
-            {"Effect": "Deny", "Action": ["Write"], "Resource": "acs:odps:*:*"},
-        ])
+
+        result = SecurityMixin._normalize_effect_entries(
+            [
+                {"Effect": "Deny", "Action": ["Write"], "Resource": "acs:odps:*:*"},
+            ]
+        )
         assert result[0]["Effect"] == "Deny"
 
     def test_non_dict_entries_passed_through(self) -> None:
         """Non-dict entries (e.g. raw markers) should pass through unchanged."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         result = SecurityMixin._normalize_effect_entries(["raw_marker", 42])
         assert result == ["raw_marker", 42]
 
     def test_empty_list(self) -> None:
         """Empty list should return empty list."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         result = SecurityMixin._normalize_effect_entries([])
         assert result == []
 
     def test_mixed_entries(self) -> None:
         """Mix of dict and non-dict entries should be handled correctly."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
-        result = SecurityMixin._normalize_effect_entries([
-            {"Effect": "", "Action": ["All"]},
-            "marker_string",
-            {"Effect": "Allow", "Action": ["Read"]},
-        ])
+
+        result = SecurityMixin._normalize_effect_entries(
+            [
+                {"Effect": "", "Action": ["All"]},
+                "marker_string",
+                {"Effect": "Allow", "Action": ["Read"]},
+            ]
+        )
         assert result[0]["Effect"] == "Allow"  # normalized
-        assert result[1] == "marker_string"      # pass-through
-        assert result[2]["Effect"] == "Allow"    # already correct
+        assert result[1] == "marker_string"  # pass-through
+        assert result[2]["Effect"] == "Allow"  # already correct
 
 
 # ---------------------------------------------------------------------------
 # 6. _enrich_creator_arn unit tests (no env info leaked)
 # ---------------------------------------------------------------------------
+
 
 class TestEnrichCreatorArnUnit:
     """Unit tests for _enrich_creator_arn with mocked ODPS client."""
@@ -365,6 +416,7 @@ class TestEnrichCreatorArnUnit:
     def test_table_type(self) -> None:
         """If exist_table returns True, should return table ARN."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         odps = MagicMock()
         odps.exist_table.return_value = True
@@ -374,6 +426,7 @@ class TestEnrichCreatorArnUnit:
     def test_resource_type(self) -> None:
         """If table not found but exist_resource True, should return resource ARN."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         odps = MagicMock()
         odps.exist_table.return_value = False
@@ -384,17 +437,21 @@ class TestEnrichCreatorArnUnit:
     def test_function_type(self) -> None:
         """If table/resource not found but exist_function True, should return function ARN."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         odps = MagicMock()
         odps.exist_table.return_value = False
         odps.exist_resource.return_value = False
         odps.exist_function.return_value = True
         result = mixin._enrich_creator_arn(odps, "test_project", "my_func")
-        assert result == "acs:odps:*:projects/test_project/registration/functions/my_func"
+        assert (
+            result == "acs:odps:*:projects/test_project/registration/functions/my_func"
+        )
 
     def test_unknown_type_returns_name(self) -> None:
         """If no type matches, should return the name as-is."""
         from maxcompute_catalog_mcp.tools_security import SecurityMixin
+
         mixin = SecurityMixin()
         odps = MagicMock()
         odps.exist_table.return_value = False

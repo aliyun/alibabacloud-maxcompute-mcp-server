@@ -152,9 +152,7 @@ def _configured_endpoint_identity(
     explicit_region = (config.region or "").strip().lower()
     explicit_network_text = (config.network or "").strip().lower()
     explicit_network = (
-        EndpointNetwork(explicit_network_text)
-        if explicit_network_text
-        else None
+        EndpointNetwork(explicit_network_text) if explicit_network_text else None
     )
     for identity in identities:
         region_conflicts = bool(explicit_region) and explicit_region != identity.region
@@ -200,9 +198,7 @@ def _regional_mcp_url(identity: EndpointIdentity) -> str:
     prefix = "mcp" if _is_mainland_china_region(identity.region) else "mcp-intl"
     if identity.network is EndpointNetwork.PUBLIC:
         return f"https://{prefix}.{identity.region}.maxcompute.aliyun.com/mcp"
-    return (
-        f"https://{prefix}.{identity.region}-vpc.maxcompute.aliyun-inc.com/mcp"
-    )
+    return f"https://{prefix}.{identity.region}-vpc.maxcompute.aliyun-inc.com/mcp"
 
 
 def _is_loopback_url(url: str) -> bool:
@@ -247,13 +243,8 @@ def _validate_network_compatibility(
         raise ValueError(
             "remote MCP URL network type must match the MaxCompute endpoint"
         )
-    if (
-        maxcompute.network is EndpointNetwork.VPC
-        and remote.region != maxcompute.region
-    ):
-        raise ValueError(
-            "a VPC MaxCompute endpoint requires a same Region VPC MCP URL"
-        )
+    if maxcompute.network is EndpointNetwork.VPC and remote.region != maxcompute.region:
+        raise ValueError("a VPC MaxCompute endpoint requires a same Region VPC MCP URL")
 
 
 def _load_document(config_path: str | None) -> dict[str, Any]:

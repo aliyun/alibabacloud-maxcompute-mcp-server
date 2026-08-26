@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Coverage-boost tests: exercises code paths not yet covered by other tests.
 
 Two categories:
@@ -26,21 +25,25 @@ Note: 3-level (schema-enabled) project paths are not tested here because the
 current test environment uses 2-level projects. Those paths are covered by
 unit tests in test_tools.py when a 3-level environment is available.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, List
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
 from pyodps_catalog import models as catalog_models
 
 from maxcompute_catalog_mcp.tools import Tools
 from tests.conftest import (
     async_wait_instance as _async_wait,
+)
+from tests.conftest import (
     has_config as _has_config,
+)
+from tests.conftest import (
     text_payload as _text_payload,
 )
 
@@ -50,6 +53,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Additional fixture: Tools with a real pyodps_catalog.Table in the mock SDK
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def tools_with_table(tools: Tools, mock_sdk: MagicMock) -> Tools:
@@ -97,6 +101,7 @@ def tools_with_table(tools: Tools, mock_sdk: MagicMock) -> Tools:
 # 1.1  tools.specs() — covers tools.py 215-665 and tools_common.py 165-183
 # ---------------------------------------------------------------------------
 
+
 class TestSpecsCoverage:
     """Call tools.specs() to cover the full tool-spec definition block."""
 
@@ -116,9 +121,14 @@ class TestSpecsCoverage:
     def test_specs_contains_expected_tools(self, tools: Tools) -> None:
         names = {s.name for s in tools.specs()}
         expected = {
-            "list_projects", "get_project", "get_table_schema",
-            "execute_sql", "cost_sql", "check_access",
-            "create_table", "insert_values",
+            "list_projects",
+            "get_project",
+            "get_table_schema",
+            "execute_sql",
+            "cost_sql",
+            "check_access",
+            "create_table",
+            "insert_values",
         }
         missing = expected - names
         assert not missing, f"specs() missing expected tools: {missing}"
@@ -127,6 +137,7 @@ class TestSpecsCoverage:
 # ---------------------------------------------------------------------------
 # 1.2  update_table: _normalize_patch validation errors (all before API call)
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateTableValidation:
     """_normalize_patch validation errors: returned before any SDK call."""
@@ -155,8 +166,10 @@ class TestUpdateTableValidation:
         assert "labels.set" in p["error"]
 
     def test_labels_mode_invalid(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "labels": {"set": {"k": "v"}, "mode": "invalid"}})
+        r = tools.call(
+            "update_table",
+            {"table": "t1", "labels": {"set": {"k": "v"}, "mode": "invalid"}},
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "mode" in p["error"]
@@ -183,20 +196,23 @@ class TestUpdateTableValidation:
         assert p["success"] is False
 
     def test_columns_set_comments_not_dict(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "columns": {"setComments": "bad"}})
+        r = tools.call(
+            "update_table", {"table": "t1", "columns": {"setComments": "bad"}}
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
     def test_columns_set_nullable_not_list(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "columns": {"setNullable": "bad"}})
+        r = tools.call(
+            "update_table", {"table": "t1", "columns": {"setNullable": "bad"}}
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
     def test_columns_set_nullable_nested(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "columns": {"setNullable": ["addr.city"]}})
+        r = tools.call(
+            "update_table", {"table": "t1", "columns": {"setNullable": ["addr.city"]}}
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "nested" in p["error"].lower() or "top-level" in p["error"].lower()
@@ -207,21 +223,24 @@ class TestUpdateTableValidation:
         assert p["success"] is False
 
     def test_columns_add_item_not_dict(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "columns": {"add": ["notadict"]}})
+        r = tools.call(
+            "update_table", {"table": "t1", "columns": {"add": ["notadict"]}}
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
     def test_columns_add_missing_name(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "columns": {"add": [{"type": "STRING"}]}})
+        r = tools.call(
+            "update_table", {"table": "t1", "columns": {"add": [{"type": "STRING"}]}}
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "name" in p["error"]
 
     def test_columns_add_missing_type(self, tools: Tools) -> None:
-        r = tools.call("update_table", {"table": "t1",
-                                         "columns": {"add": [{"name": "col1"}]}})
+        r = tools.call(
+            "update_table", {"table": "t1", "columns": {"add": [{"name": "col1"}]}}
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "type" in p["error"]
@@ -237,61 +256,80 @@ class TestUpdateTableValidation:
 # 1.3  update_table: _apply_plan paths (need proper Table mock)
 # ---------------------------------------------------------------------------
 
+
 class TestApplyPlanPaths:
     """_apply_plan paths reached after get_table; require tools_with_table fixture."""
 
     def test_labels_delete_mode(self, tools_with_table: Tools) -> None:
         """labels.mode='delete' executes the delete branch in _apply_plan."""
-        r = tools_with_table.call("update_table", {
-            "table": "t1",
-            "labels": {"set": {"env": "prod"}, "mode": "delete"},
-        })
+        r = tools_with_table.call(
+            "update_table",
+            {
+                "table": "t1",
+                "labels": {"set": {"env": "prod"}, "mode": "delete"},
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
         assert "labels(delete)" in (p.get("data") or {}).get("updatedFields", [])
 
     def test_expiration_days_update(self, tools_with_table: Tools) -> None:
         """expiration.days updates expiration_options in _apply_plan."""
-        r = tools_with_table.call("update_table", {
-            "table": "t1",
-            "expiration": {"days": 30},
-        })
+        r = tools_with_table.call(
+            "update_table",
+            {
+                "table": "t1",
+                "expiration": {"days": 30},
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
         assert "expiration" in (p.get("data") or {}).get("updatedFields", [])
 
     def test_expiration_partition_days_update(self, tools_with_table: Tools) -> None:
-        r = tools_with_table.call("update_table", {
-            "table": "t1",
-            "expiration": {"partitionDays": 7},
-        })
+        r = tools_with_table.call(
+            "update_table",
+            {
+                "table": "t1",
+                "expiration": {"partitionDays": 7},
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
 
     def test_set_comments_column_not_found(self, tools_with_table: Tools) -> None:
         """setComments with non-existent column path raises ValueError → success=false."""
-        r = tools_with_table.call("update_table", {
-            "table": "t1",
-            "columns": {"setComments": {"nonexistent_col": "some desc"}},
-        })
+        r = tools_with_table.call(
+            "update_table",
+            {
+                "table": "t1",
+                "columns": {"setComments": {"nonexistent_col": "some desc"}},
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "not found" in p["error"]
 
     def test_set_nullable_column_not_found(self, tools_with_table: Tools) -> None:
-        r = tools_with_table.call("update_table", {
-            "table": "t1",
-            "columns": {"setNullable": ["nonexistent_col"]},
-        })
+        r = tools_with_table.call(
+            "update_table",
+            {
+                "table": "t1",
+                "columns": {"setNullable": ["nonexistent_col"]},
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "not found" in p["error"]
 
     def test_add_duplicate_column(self, tools_with_table: Tools) -> None:
-        r = tools_with_table.call("update_table", {
-            "table": "t1",
-            "columns": {"add": [{"name": "id", "type": "STRING"}]},
-        })
+        r = tools_with_table.call(
+            "update_table",
+            {
+                "table": "t1",
+                "columns": {"add": [{"name": "id", "type": "STRING"}]},
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "already exists" in p["error"]
@@ -300,6 +338,7 @@ class TestApplyPlanPaths:
 # ---------------------------------------------------------------------------
 # 1.4  execute_sql edge cases (bad arg types)
 # ---------------------------------------------------------------------------
+
 
 class TestExecuteSqlEdgeCases:
     """Cover execute_sql argument validation error paths."""
@@ -313,102 +352,134 @@ class TestExecuteSqlEdgeCases:
 
     def test_bad_timeout_string(self, tools: Tools) -> None:
         """timeout='bad' raises ValueError → success=false."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "async": False,
-            "timeout": "bad",
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "async": False,
+                "timeout": "bad",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "timeout" in p["error"].lower() or "Invalid" in p["error"]
 
     def test_bad_timeout_zero(self, tools: Tools) -> None:
         """timeout=0 (non-positive) raises ValueError → success=false."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "async": False,
-            "timeout": 0,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "async": False,
+                "timeout": 0,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
     def test_unsupported_output_uri_scheme(self, tools: Tools) -> None:
         """output_uri with unsupported scheme → success=false."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "async": False,
-            "output_uri": "s3://mybucket/result.jsonl",
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": "s3://mybucket/result.jsonl",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "s3" in p["error"] or "Unsupported" in p["error"]
 
     def test_output_uri_whitespace_only(self, tools: Tools) -> None:
         """output_uri='   ' (whitespace) triggers 'empty path' error."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "async": False,
-            "output_uri": "   ",
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": "   ",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "empty" in p["error"].lower() or "output_uri" in p["error"].lower()
 
     def test_output_uri_file_empty_path(self, tools: Tools) -> None:
         """output_uri='file://' (empty file path) → success=false."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "async": False,
-            "output_uri": "file://",
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": "file://",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
     def test_output_uri_restricted_system_path(self, tools: Tools) -> None:
         """output_uri targeting /etc is rejected."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "async": False,
-            "output_uri": "/etc/myresult.jsonl",
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": "/etc/myresult.jsonl",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
-        assert "restricted" in p["error"].lower() or "sensitive" in p["error"].lower() or "/etc" in p["error"]
+        assert (
+            "restricted" in p["error"].lower()
+            or "sensitive" in p["error"].lower()
+            or "/etc" in p["error"]
+        )
 
 
 # ---------------------------------------------------------------------------
 # 1.5  SQL safety edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestSqlSafetyEdgeCases:
     """Cover _is_read_only_sql paths not hit by other E2E tests."""
 
     def test_comment_only_sql(self, tools: Tools) -> None:
         """SQL that strips to nothing (only comments) → 'Empty SQL after removing comments'."""
-        r = tools.call("execute_sql", {
-            "sql": "-- just a comment\n/* block comment */",
-            "async": False,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "-- just a comment\n/* block comment */",
+                "async": False,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "Empty" in p["error"] or "comment" in p["error"].lower()
 
     def test_with_dml_bypass_attempt(self, tools: Tools) -> None:
         """WITH ... DELETE is rejected by CTE body scan."""
-        r = tools.call("execute_sql", {
-            "sql": "WITH x AS (SELECT 1 AS n) DELETE FROM target_table",
-            "async": False,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "WITH x AS (SELECT 1 AS n) DELETE FROM target_table",
+                "async": False,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "DELETE" in p["error"] or "Unsafe" in p["error"]
 
     def test_unknown_first_keyword(self, tools: Tools) -> None:
         """Unknown first keyword rejected by the keyword check."""
-        r = tools.call("execute_sql", {
-            "sql": "UNKNOWNKEYWORD col FROM t1",
-            "async": False,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "UNKNOWNKEYWORD col FROM t1",
+                "async": False,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
@@ -417,11 +488,13 @@ class TestSqlSafetyEdgeCases:
 # 1.6  cost_sql long SQL → sqlTruncated=True
 # ---------------------------------------------------------------------------
 
-class TestCostSqlEdgeCases:
 
+class TestCostSqlEdgeCases:
     def test_cost_sql_long_sql_truncated(self, tools: Tools) -> None:
         """SQL > 200 chars sets sqlTruncated=True in the result."""
-        long_sql = "SELECT " + ", ".join(f"col_{i}" for i in range(60)) + " FROM my_table"
+        long_sql = (
+            "SELECT " + ", ".join(f"col_{i}" for i in range(60)) + " FROM my_table"
+        )
         assert len(long_sql) > 200
         r = tools.call("cost_sql", {"sql": long_sql})
         p = _text_payload(r)
@@ -431,10 +504,13 @@ class TestCostSqlEdgeCases:
 
     def test_cost_sql_with_maxcu_zero(self, tools: Tools) -> None:
         """maxCU=0: estimated CU (>0 from stub) exceeds limit → overLimit=True."""
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "maxCU": 0,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "maxCU": 0,
+            },
+        )
         p = _text_payload(r)
         # With mock execute_sql_cost returning "0.1", estimatedCU=1 > maxCU=0
         assert p.get("overLimit") is True or p.get("success") is False, (
@@ -446,16 +522,19 @@ class TestCostSqlEdgeCases:
 # 1.7  insert_values: async mode, value types, partition errors
 # ---------------------------------------------------------------------------
 
-class TestInsertValuesEdgeCases:
 
+class TestInsertValuesEdgeCases:
     def test_insert_async_non_partitioned(self, tools: Tools) -> None:
         """insert_values async=True (non-partitioned) returns instanceId."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id", "name"],
-            "values": [[1, "Alice"]],
-            "async": True,
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id", "name"],
+                "values": [[1, "Alice"]],
+                "async": True,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
         assert "instanceId" in p
@@ -463,17 +542,20 @@ class TestInsertValuesEdgeCases:
 
     def test_insert_async_partitioned(self, tools: Tools) -> None:
         """insert_values async=True (partitioned) returns batches list."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id", "name", "ds"],
-            "values": [
-                [1, "Alice", "20250101"],
-                [2, "Bob", "20250101"],
-                [3, "Carol", "20250102"],
-            ],
-            "partitionColumns": ["ds"],
-            "async": True,
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id", "name", "ds"],
+                "values": [
+                    [1, "Alice", "20250101"],
+                    [2, "Bob", "20250101"],
+                    [3, "Carol", "20250102"],
+                ],
+                "partitionColumns": ["ds"],
+                "async": True,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
         assert "batches" in p
@@ -481,105 +563,134 @@ class TestInsertValuesEdgeCases:
 
     def test_insert_value_types_null_bool_float_date(self, tools: Tools) -> None:
         """Various value types: NULL, bool, float, date string → correct SQL quoting."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["a", "b", "c", "d"],
-            "values": [[None, True, 3.14, "2025-01-01"]],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["a", "b", "c", "d"],
+                "values": [[None, True, 3.14, "2025-01-01"]],
+            },
+        )
         p = _text_payload(r)
         # mock run_sql always works; verify success
         assert p.get("success") is True, f"insert_values with mixed types failed: {p}"
 
     def test_insert_value_types_false_bool(self, tools: Tools) -> None:
         """bool False → 'false' in SQL."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["flag"],
-            "values": [[False]],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["flag"],
+                "values": [[False]],
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"insert_values with False bool failed: {p}"
 
     def test_insert_partition_col_not_in_columns(self, tools: Tools) -> None:
         """partitionColumns references a column not in columns → success=false."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id"],
-            "values": [[1]],
-            "partitionColumns": ["missing_col"],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id"],
+                "values": [[1]],
+                "partitionColumns": ["missing_col"],
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "not found" in p["error"]
 
     def test_insert_all_cols_are_partition(self, tools: Tools) -> None:
         """All columns are partition columns → no data columns → success=false."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["ds"],
-            "values": [["20250101"]],
-            "partitionColumns": ["ds"],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["ds"],
+                "values": [["20250101"]],
+                "partitionColumns": ["ds"],
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "data column" in p["error"].lower() or "At least" in p["error"]
 
     def test_insert_row_length_mismatch(self, tools: Tools) -> None:
         """Row shorter than columns list → success=false."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id", "ds"],
-            "values": [[1]],  # missing ds value
-            "partitionColumns": ["ds"],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id", "ds"],
+                "values": [[1]],  # missing ds value
+                "partitionColumns": ["ds"],
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "Row length" in p["error"] or "does not match" in p["error"]
 
     def test_insert_partition_null_value(self, tools: Tools) -> None:
         """NULL as partition column value → ValueError in _quote_partition_literal."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id", "ds"],
-            "values": [[1, None]],
-            "partitionColumns": ["ds"],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id", "ds"],
+                "values": [[1, None]],
+                "partitionColumns": ["ds"],
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "NULL" in p["error"] or "null" in p["error"].lower()
 
     def test_insert_partition_bool_value(self, tools: Tools) -> None:
         """bool as partition value → triggers bool branch in _quote_partition_literal."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id", "flag"],
-            "values": [[1, True]],
-            "partitionColumns": ["flag"],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id", "flag"],
+                "values": [[1, True]],
+                "partitionColumns": ["flag"],
+            },
+        )
         p = _text_payload(r)
         # mock run_sql always works; verify success
-        assert p.get("success") is True, f"insert_values with partition bool failed: {p}"
+        assert p.get("success") is True, (
+            f"insert_values with partition bool failed: {p}"
+        )
 
     def test_insert_partition_int_value(self, tools: Tools) -> None:
         """int partition value → triggers int branch in _quote_partition_literal."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id", "year"],
-            "values": [[1, 2025]],
-            "partitionColumns": ["year"],
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id", "year"],
+                "values": [[1, 2025]],
+                "partitionColumns": ["year"],
+            },
+        )
         p = _text_payload(r)
         # mock run_sql always works; verify success
         assert p.get("success") is True, f"insert_values with partition int failed: {p}"
 
     def test_insert_async_bad_type(self, tools: Tools) -> None:
         """async='yes' (string) → TypeError → success=false."""
-        r = tools.call("insert_values", {
-            "table": "t1",
-            "columns": ["id"],
-            "values": [[1]],
-            "async": "yes",
-        })
+        r = tools.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id"],
+                "values": [[1]],
+                "async": "yes",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
 
@@ -588,56 +699,71 @@ class TestInsertValuesEdgeCases:
 # 1.8  create_table validation errors
 # ---------------------------------------------------------------------------
 
-class TestCreateTableEdgeCases:
 
+class TestCreateTableEdgeCases:
     def test_ifnotexists_nonbool(self, tools: Tools) -> None:
         """ifNotExists='yes' (string) → TypeError → success=false."""
-        r = tools.call("create_table", {
-            "table": "t1",
-            "columns": [{"name": "id", "type": "BIGINT"}],
-            "ifNotExists": "yes",
-        })
+        r = tools.call(
+            "create_table",
+            {
+                "table": "t1",
+                "columns": [{"name": "id", "type": "BIGINT"}],
+                "ifNotExists": "yes",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "boolean" in p["error"].lower()
 
     def test_table_properties_not_dict(self, tools: Tools) -> None:
-        r = tools.call("create_table", {
-            "table": "t1",
-            "columns": [{"name": "id", "type": "BIGINT"}],
-            "tableProperties": "bad",
-        })
+        r = tools.call(
+            "create_table",
+            {
+                "table": "t1",
+                "columns": [{"name": "id", "type": "BIGINT"}],
+                "tableProperties": "bad",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "tableProperties" in p["error"]
 
     def test_hints_not_dict(self, tools: Tools) -> None:
-        r = tools.call("create_table", {
-            "table": "t1",
-            "columns": [{"name": "id", "type": "BIGINT"}],
-            "hints": "bad",
-        })
+        r = tools.call(
+            "create_table",
+            {
+                "table": "t1",
+                "columns": [{"name": "id", "type": "BIGINT"}],
+                "hints": "bad",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "hints" in p["error"]
 
     def test_primary_key_not_list(self, tools: Tools) -> None:
-        r = tools.call("create_table", {
-            "table": "t1",
-            "columns": [{"name": "id", "type": "BIGINT"}],
-            "primaryKey": "id",
-        })
+        r = tools.call(
+            "create_table",
+            {
+                "table": "t1",
+                "columns": [{"name": "id", "type": "BIGINT"}],
+                "primaryKey": "id",
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "primaryKey" in p["error"]
 
     def test_primary_key_empty_list_normalized_to_none(self, tools: Tools) -> None:
         """primaryKey=[] is normalized to None; create_table should succeed."""
-        r = tools.call("create_table", {
-            "table": "t1",
-            "columns": [{"name": "id", "type": "BIGINT"}],
-            "primaryKey": [],
-        })
+        r = tools.call(
+            "create_table",
+            {
+                "table": "t1",
+                "columns": [{"name": "id", "type": "BIGINT"}],
+                "primaryKey": [],
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
 
@@ -658,6 +784,7 @@ class TestCreateTableEdgeCases:
 # 1.9  tools_no_compute: unsupported paths
 # ---------------------------------------------------------------------------
 
+
 class TestToolsNoCompute:
     """Tools without maxcompute_client returns 'unsupported' for compute tools."""
 
@@ -667,19 +794,25 @@ class TestToolsNoCompute:
         assert p.get("error") == "unsupported" or p.get("success") is False
 
     def test_insert_values_unsupported(self, tools_no_compute: Tools) -> None:
-        r = tools_no_compute.call("insert_values", {
-            "table": "t1",
-            "columns": ["id"],
-            "values": [[1]],
-        })
+        r = tools_no_compute.call(
+            "insert_values",
+            {
+                "table": "t1",
+                "columns": ["id"],
+                "values": [[1]],
+            },
+        )
         p = _text_payload(r)
         assert p.get("error") == "unsupported" or p.get("success") is False
 
     def test_create_table_unsupported(self, tools_no_compute: Tools) -> None:
-        r = tools_no_compute.call("create_table", {
-            "table": "t1",
-            "columns": [{"name": "id", "type": "STRING"}],
-        })
+        r = tools_no_compute.call(
+            "create_table",
+            {
+                "table": "t1",
+                "columns": [{"name": "id", "type": "STRING"}],
+            },
+        )
         p = _text_payload(r)
         assert p.get("error") == "unsupported" or p.get("success") is False
 
@@ -703,24 +836,30 @@ class TestToolsNoCompute:
 # 1.10  check_access mock edge cases
 # ---------------------------------------------------------------------------
 
-class TestCheckAccessMockEdgeCases:
 
+class TestCheckAccessMockEdgeCases:
     def test_include_grants_nonbool_coerced(self, tools: Tools) -> None:
         """include_grants=1 (int) triggers the warning log path + bool coercion."""
-        r = tools.call("check_access", {
-            "project": "p1",
-            "include_grants": 1,  # int, not bool — triggers line 173-177
-        })
+        r = tools.call(
+            "check_access",
+            {
+                "project": "p1",
+                "include_grants": 1,  # int, not bool — triggers line 173-177
+            },
+        )
         p = _text_payload(r)
         # Mock may not have run_security_query; success either way
         assert isinstance(p, dict)
 
     def test_include_grants_true_empty_project(self, tools: Tools) -> None:
         """include_grants=True with project='' → error 'project is required'."""
-        r = tools.call("check_access", {
-            "project": "",
-            "include_grants": True,
-        })
+        r = tools.call(
+            "check_access",
+            {
+                "project": "",
+                "include_grants": True,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is False
         assert "project" in p["error"].lower() or "required" in p["error"].lower()
@@ -729,6 +868,7 @@ class TestCheckAccessMockEdgeCases:
 # ===========================================================================
 # Category 2: Real-tools E2E tests (need config.json)
 # ===========================================================================
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestOutputUriStreaming:
@@ -742,13 +882,16 @@ class TestOutputUriStreaming:
             pytest.skip("default_project not configured")
 
         output_file = tmp_path / "result.jsonl"
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS n, 'hello' AS s",
-            "async": False,
-            "output_uri": output_file.as_uri(),
-            "timeout": 120,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS n, 'hello' AS s",
+                "async": False,
+                "output_uri": output_file.as_uri(),
+                "timeout": 120,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True, f"execute_sql with output_uri failed: {p}"
         # A decorated file should exist (instanceId is appended to stem)
@@ -771,13 +914,16 @@ class TestOutputUriStreaming:
             pytest.skip("default_project not configured")
 
         output_file = tmp_path / "out.jsonl"
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS x",
-            "async": False,
-            "output_uri": output_file.as_uri(),
-            "timeout": 120,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS x",
+                "async": False,
+                "output_uri": output_file.as_uri(),
+                "timeout": 120,
+            },
+        )
         p = _text_payload(r)
         assert p["success"] is True
         assert "outputPath" in p, f"Response should contain outputPath: {p}"
@@ -797,11 +943,14 @@ class TestGetInstanceOutputUri:
             pytest.skip("default_project not configured")
 
         # Submit async SQL
-        r1 = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS n",
-            "async": True,
-        })
+        r1 = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS n",
+                "async": True,
+            },
+        )
         p1 = _text_payload(r1)
         assert p1["success"] is True, f"execute_sql async failed: {p1}"
         instance_id = p1["instanceId"]
@@ -812,16 +961,19 @@ class TestGetInstanceOutputUri:
 
         # Fetch result with output_uri
         output_file = tmp_path / "inst_result.jsonl"
-        r2 = real_tools.call("get_instance", {
-            "project": project,
-            "instanceId": instance_id,
-            "output_uri": output_file.as_uri(),
-        })
+        r2 = real_tools.call(
+            "get_instance",
+            {
+                "project": project,
+                "instanceId": instance_id,
+                "output_uri": output_file.as_uri(),
+            },
+        )
         p2 = _text_payload(r2)
         assert "instanceId" in p2, f"get_instance response missing instanceId: {p2}"
         # Results should have outputPath
         results = p2.get("results") or {}
-        for task_name, task_data in results.items():
+        for task_data in results.values():
             if isinstance(task_data, dict) and "outputPath" in task_data:
                 assert task_data["bytesWritten"] is not None
                 break
@@ -839,11 +991,14 @@ class TestMaxCUEnforcement:
         if not project:
             pytest.skip("default_project not configured")
 
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-            "maxCU": 0,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+                "maxCU": 0,
+            },
+        )
         p = _text_payload(r)
         # Either overLimit=True (cost > 0) or success=True (cost exactly 0 edge case)
         # Either way, the maxCU code path was exercised
@@ -858,12 +1013,15 @@ class TestMaxCUEnforcement:
         if not project:
             pytest.skip("default_project not configured")
 
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS x",
-            "maxCU": 1000,
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS x",
+                "maxCU": 1000,
+                "async": True,
+            },
+        )
         p = _text_payload(r)
         # Should be submitted (not blocked by maxCU)
         assert p.get("success") is True or "overLimit" in p, (
@@ -879,7 +1037,9 @@ class TestMaxCUEnforcement:
 class TestComputeEdgeCases:
     """Cover remaining tools_compute.py branches via mock."""
 
-    def test_get_instance_logview_exception(self, tools: Tools, mock_sdk: MagicMock) -> None:
+    def test_get_instance_logview_exception(
+        self, tools: Tools, mock_sdk: MagicMock
+    ) -> None:
         """_get_instance_logview: exception handler path.
 
         Note: Tests private method directly because the public API path
@@ -887,6 +1047,7 @@ class TestComputeEdgeCases:
         The logview URL is optional metadata, so this isolated test is acceptable.
         """
         from maxcompute_catalog_mcp.tools_compute import ComputeMixin
+
         mixin = ComputeMixin()
         inst = MagicMock()
         inst.get_logview_address.side_effect = RuntimeError("no logview")
@@ -897,16 +1058,20 @@ class TestComputeEdgeCases:
         """execute_sql: TypeError/ValueError for bad maxCU coercion."""
         # When maxCU is a dict, int(dict) raises TypeError → maxCU becomes None
         # (the except branch clears it rather than erroring out)
-        r = tools.call("execute_sql", {
-            "sql": "SELECT 1",
-            "maxCU": {"bad": "value"},
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "sql": "SELECT 1",
+                "maxCU": {"bad": "value"},
+            },
+        )
         # Should not crash — maxCU coercion failure is silently treated as None
         assert isinstance(r, dict)
 
     def test_get_instance_not_terminated(self, tools: Tools) -> None:
         """get_instance: instance not yet terminated returns pending message."""
         from unittest.mock import patch
+
         inst = MagicMock()
         inst.is_terminated = MagicMock(return_value=False)
         with patch.object(tools.maxcompute_client, "get_instance", return_value=inst):
@@ -917,6 +1082,7 @@ class TestComputeEdgeCases:
     def test_get_instance_no_task_results(self, tools: Tools) -> None:
         """get_instance: empty task results."""
         from unittest.mock import patch
+
         inst = MagicMock()
         inst.is_terminated = MagicMock(return_value=True)
         inst.get_task_results = MagicMock(return_value={})
@@ -927,16 +1093,21 @@ class TestComputeEdgeCases:
 
     def test_get_instance_bad_output_uri(self, tools: Tools) -> None:
         """get_instance: bad output_uri raises ValueError → error response."""
-        r = tools.call("get_instance", {
-            "instanceId": "abc123",
-            "output_uri": "bad://not-a-file-uri",
-        })
+        r = tools.call(
+            "get_instance",
+            {
+                "instanceId": "abc123",
+                "output_uri": "bad://not-a-file-uri",
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
 
     def test_get_instance_with_reader(self, tools: Tools) -> None:
         """get_instance: task result with open_reader (no schema columns)."""
-        from unittest.mock import patch, MagicMock as MM
+        from unittest.mock import MagicMock as MM
+        from unittest.mock import patch
+
         inst = MM()
         inst.is_terminated = MM(return_value=True)
         task_result = MM()
@@ -957,7 +1128,9 @@ class TestComputeEdgeCases:
 
     def test_get_instance_task_non_reader(self, tools: Tools) -> None:
         """get_instance: task result without open_reader (raw string path)."""
-        from unittest.mock import patch, MagicMock as MM
+        from unittest.mock import MagicMock as MM
+        from unittest.mock import patch
+
         inst = MM()
         inst.is_terminated = MM(return_value=True)
         # Create a task result that does NOT have open_reader
@@ -972,6 +1145,7 @@ class TestComputeEdgeCases:
     def test_cost_estimation_failure_stub(self, tools: Tools) -> None:
         """_estimate_sql_cost: exception from SDK returns stub response."""
         from unittest.mock import patch
+
         with patch.object(
             tools._get_compute_client_for_project(tools.default_project),
             "execute_sql_cost",

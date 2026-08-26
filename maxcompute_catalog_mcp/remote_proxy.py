@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterable
+from collections.abc import AsyncGenerator, AsyncIterable
 from dataclasses import replace
 from typing import Any, Protocol
 
@@ -35,7 +35,10 @@ class DynamicBearerAuth(httpx.Auth):
     def __init__(self, provider: AccessTokenProvider) -> None:
         self._provider = provider
 
-    async def async_auth_flow(self, request: httpx.Request):
+    async def async_auth_flow(
+        self,
+        request: httpx.Request,
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
         token = await self._provider.get_access_token()
         request.headers["Authorization"] = f"Bearer {token}"
         yield request
@@ -67,9 +70,7 @@ class ProtocolMetadataBridge:
             return message
 
         self_describing_version = self._self_describing_version(payload.params)
-        protocol_version = (
-            self_describing_version or self._legacy_protocol_version
-        )
+        protocol_version = self_describing_version or self._legacy_protocol_version
         if protocol_version is None:
             return message
 
@@ -140,17 +141,21 @@ async def probe_remote_mcp(
     from mcp.client.streamable_http import streamable_http_client
 
     with anyio.fail_after(_REMOTE_INITIALIZATION_TIMEOUT_SECONDS):
-        async with httpx.AsyncClient(
-            auth=DynamicBearerAuth(token_provider),
-            follow_redirects=False,
-            trust_env=False,
-        ) as mcp_client, streamable_http_client(
-            config.url,
-            http_client=mcp_client,
-        ) as (remote_read, remote_write), ClientSession(
-            remote_read,
-            remote_write,
-        ) as session:
+        async with (
+            httpx.AsyncClient(
+                auth=DynamicBearerAuth(token_provider),
+                follow_redirects=False,
+                trust_env=False,
+            ) as mcp_client,
+            streamable_http_client(
+                config.url,
+                http_client=mcp_client,
+            ) as (remote_read, remote_write),
+            ClientSession(
+                remote_read,
+                remote_write,
+            ) as session,
+        ):
             await session.initialize()
 
 
@@ -225,17 +230,21 @@ async def _run_remote_proxy_with_provider(
     from mcp.client.streamable_http import streamable_http_client
     from mcp.server.stdio import stdio_server
 
-    async with httpx.AsyncClient(
-        auth=DynamicBearerAuth(token_provider),
-        follow_redirects=False,
-        trust_env=False,
-    ) as mcp_client, stdio_server() as (
-        local_read,
-        local_write,
-    ), streamable_http_client(
-        config.url,
-        http_client=mcp_client,
-    ) as (remote_read, remote_write):
+    async with (
+        httpx.AsyncClient(
+            auth=DynamicBearerAuth(token_provider),
+            follow_redirects=False,
+            trust_env=False,
+        ) as mcp_client,
+        stdio_server() as (
+            local_read,
+            local_write,
+        ),
+        streamable_http_client(
+            config.url,
+            http_client=mcp_client,
+        ) as (remote_read, remote_write),
+    ):
         await relay_bidirectional(
             local_read,
             local_write,

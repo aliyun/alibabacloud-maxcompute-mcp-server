@@ -113,9 +113,12 @@ current isolated build happens to select a newer backend.
 At the reviewed baseline, the compatibility and runtime security floors under
 `[tool.uv].constraint-dependencies` were project-sync constraints rather than
 `Requires-Dist` metadata, so a normal `pip install` from PyPI would not enforce
-them. The release preparation moves the `pyarrow` compatibility range and the
-runtime security floors into `[project].dependencies`; only the development-only
-`pygments` floor remains under `[tool.uv]`.
+them. The release preparation moves runtime security floors into published
+package metadata; only the development-only `pygments` floor remains under
+`[tool.uv]`. The remote-first base package does not install PyODPS or PyArrow.
+The optional `local` extra enforces `pyarrow>=23.0.1` after GitHub published
+`GHSA-rgxp-2hwp-jwgg`; its patched wheels require glibc 2.28+ or musl 1.2+ on
+Linux, while remote users avoid that native dependency entirely.
 
 ## Recommended Trusted Publishing setup
 

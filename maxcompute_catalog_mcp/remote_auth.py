@@ -73,7 +73,7 @@ class CatalogMCPAccessTokenClient:
                 request,
                 runtime,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 -- sanitize the external SDK boundary.
             raise RuntimeError("CatalogAPI MCP token request failed") from None
 
 
@@ -119,14 +119,14 @@ class CatalogAccessTokenProvider:
     async def _renew(self) -> AccessToken:
         try:
             payload = await self._client.issue_access_token()
-        except Exception:
+        except Exception:  # noqa: BLE001 -- CatalogTokenClient is a provider boundary.
             raise RuntimeError("CatalogAPI MCP token request failed") from None
         return self._parse_access_token(payload)
 
     @staticmethod
     def _parse_access_token(payload: object) -> AccessToken:
         if not isinstance(payload, dict):
-            raise RuntimeError("CatalogAPI MCP token returned an invalid response")
+            raise TypeError("CatalogAPI MCP token returned an invalid response")
         required_fields = {"accessToken", "tokenType", "expiresIn", "scope"}
         if not required_fields.issubset(payload):
             raise RuntimeError("CatalogAPI MCP token returned an invalid response")

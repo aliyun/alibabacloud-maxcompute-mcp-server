@@ -1,13 +1,13 @@
 """Additional boundary tests for tools_catalog.py."""
+
 from __future__ import annotations
 
 import types
 from unittest.mock import MagicMock
 
-import pytest
-
 from maxcompute_catalog_mcp.tools import Tools
-from tests.conftest import data as _data, text_payload as _text_payload
+from tests.conftest import data as _data
+from tests.conftest import text_payload as _text_payload
 
 
 def _make_tools(sdk: MagicMock | None = None, **kwargs) -> Tools:
@@ -32,7 +32,9 @@ def test_get_partition_info_sdk_no_list_partitions() -> None:
     )
     sdk.client.list_partitions.side_effect = AttributeError("no such method")
     t = _make_tools(sdk=sdk)
-    r = t.call("get_partition_info", {"project": "p1", "schema": "default", "table": "t1"})
+    r = t.call(
+        "get_partition_info", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     assert payload.get("error") == "unsupported"
 
@@ -45,7 +47,9 @@ def test_get_partition_info_exception() -> None:
     )
     sdk.client.list_partitions.side_effect = RuntimeError("api error")
     t = _make_tools(sdk=sdk)
-    r = t.call("get_partition_info", {"project": "p1", "schema": "default", "table": "t1"})
+    r = t.call(
+        "get_partition_info", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "api error" in payload.get("error", "")
@@ -111,7 +115,9 @@ def test_list_tables_with_filter() -> None:
         }
     )
     t = _make_tools(sdk=sdk)
-    r = t.call("list_tables", {"project": "p1", "schema": "default", "filter": "my_prefix"})
+    r = t.call(
+        "list_tables", {"project": "p1", "schema": "default", "filter": "my_prefix"}
+    )
     call_kwargs = sdk.client.list_tables.call_args.kwargs
     # filter is NOT passed to SDK as table_name_prefix (client-side filtering)
     assert "table_name_prefix" not in call_kwargs, (
@@ -131,11 +137,11 @@ def test_get_table_schema_non_dict_response() -> None:
     sdk.client.get_project.return_value = MagicMock(
         to_map=lambda: {"projectId": "p1", "schemaEnabled": True}
     )
-    sdk.client.get_table.return_value = MagicMock(
-        to_map=lambda: "not a dict"
-    )
+    sdk.client.get_table.return_value = MagicMock(to_map=lambda: "not a dict")
     t = _make_tools(sdk=sdk)
-    r = t.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t1"})
+    r = t.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     d = _data(payload)
     assert "raw" in d
@@ -150,7 +156,9 @@ def test_get_table_schema_with_partition_definition() -> None:
         to_map=lambda: {"projectId": "p1", "schemaEnabled": True}
     )
     t = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t1",
+        project_id="p1",
+        schema_name="default",
+        table_name="t1",
     )
     schema = catalog_models.TableFieldSchema()
     col = catalog_models.TableFieldSchema(field_name="id", sql_type_definition="BIGINT")
@@ -164,7 +172,9 @@ def test_get_table_schema_with_partition_definition() -> None:
 
     sdk.client.get_table.return_value = t
     tools = _make_tools(sdk=sdk)
-    r = tools.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t1"})
+    r = tools.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     d = _data(payload)
     assert "ds" in d.get("partitionKeys", [])
@@ -179,17 +189,25 @@ def test_get_table_schema_schema_as_list() -> None:
         to_map=lambda: {"projectId": "p1", "schemaEnabled": True}
     )
     t = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t1",
+        project_id="p1",
+        schema_name="default",
+        table_name="t1",
     )
     schema = catalog_models.TableFieldSchema()
-    col1 = catalog_models.TableFieldSchema(field_name="col1", sql_type_definition="STRING")
-    col2 = catalog_models.TableFieldSchema(field_name="col2", sql_type_definition="BIGINT")
+    col1 = catalog_models.TableFieldSchema(
+        field_name="col1", sql_type_definition="STRING"
+    )
+    col2 = catalog_models.TableFieldSchema(
+        field_name="col2", sql_type_definition="BIGINT"
+    )
     schema.fields = [col1, col2]
     t.table_schema = schema
 
     sdk.client.get_table.return_value = t
     tools = _make_tools(sdk=sdk)
-    r = tools.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t1"})
+    r = tools.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     d = _data(payload)
     assert len(d.get("columns", [])) == 2
@@ -206,7 +224,9 @@ def test_get_table_schema_partition_keys_in_schema_dict() -> None:
         to_map=lambda: {"projectId": "p1", "schemaEnabled": True}
     )
     t = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t_part",
+        project_id="p1",
+        schema_name="default",
+        table_name="t_part",
     )
     schema = catalog_models.TableFieldSchema()
     col = catalog_models.TableFieldSchema(field_name="id", sql_type_definition="BIGINT")
@@ -222,7 +242,9 @@ def test_get_table_schema_partition_keys_in_schema_dict() -> None:
 
     sdk.client.get_table.return_value = t
     tools = _make_tools(sdk=sdk)
-    r = tools.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t_part"})
+    r = tools.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t_part"}
+    )
     payload = _text_payload(r)
     d = _data(payload)
     pkeys = d.get("partitionKeys", [])
@@ -235,7 +257,9 @@ def test_iter_partition_definition_columns_helper() -> None:
 
     from pyodps_catalog import models as catalog_models
 
-    from maxcompute_catalog_mcp.tools_table_meta import _iter_partition_definition_columns
+    from maxcompute_catalog_mcp.tools_table_meta import (
+        _iter_partition_definition_columns,
+    )
 
     assert _iter_partition_definition_columns(None) == []
 

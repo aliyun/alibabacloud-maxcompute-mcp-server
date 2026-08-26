@@ -73,7 +73,9 @@ Gateway 传输失败都会终止远端流程。`default` 只在选型前 fallbac
 
 - Python 3.10+
 - [`uv`](https://docs.astral.sh/uv/)（推荐的依赖管理工具）
-- `local` 和本地 remote 代理都需要 AK、STS、凭证服务 URI、ECS RAM Role 或默认
+- 基础安装无需 PyODPS/PyArrow 即可使用默认的 remote 代理。local SDK 模式使用可选
+  `local` 依赖组；其中安全版本的 PyArrow 在 Linux 上要求 glibc 2.28+ 或 musl 1.2+
+- remote 和 local 模式都需要 AK、STS、凭证服务 URI、ECS RAM Role 或默认
   凭证链中的其他受支持凭证来源
 - remote 代理调用 CatalogAPI 的标准签名接口取得 300 秒 `mcpc_` token；不保存
   refresh token
@@ -89,6 +91,17 @@ python -m pip install alibabacloud-maxcompute-mcp-server
 # 或安装到独立环境
 uv tool install alibabacloud-maxcompute-mcp-server
 ```
+
+基础包默认面向 remote，不安装 PyODPS 或 PyArrow。只有需要原有 local SDK 实现时才安装：
+
+```bash
+python -m pip install "alibabacloud-maxcompute-mcp-server[local]"
+# 或
+uv tool install "alibabacloud-maxcompute-mcp-server[local]"
+```
+
+基础安装下 `default` 仍会优先尝试 remote；如果 remote 初始化失败，local fallback
+会提示执行上面的安装命令，不会在缺少 SDK 依赖时静默运行。
 
 验证安装后的命令行入口：
 

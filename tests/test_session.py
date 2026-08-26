@@ -3,6 +3,7 @@
 Uses an injected fake client-set builder so no real network/credentials are needed.
 Verifies switching behaviour and that AccessKey/secret are never returned.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,10 +36,22 @@ def _cfg(endpoint, ak, sk, *, region="", description="", project=""):
 
 def _make_tools():
     configs = {
-        "hz": _cfg("https://hz.example.com", "AK_HZ", "SECRET_HZ",
-                   region="cn-hangzhou", description="Hangzhou", project="p_hz"),
-        "sg": _cfg("https://sg.example.com", "AK_SG", "SECRET_SG",
-                   region="ap-southeast-1", description="Singapore", project="p_sg"),
+        "hz": _cfg(
+            "https://hz.example.com",
+            "AK_HZ",
+            "SECRET_HZ",
+            region="cn-hangzhou",
+            description="Hangzhou",
+            project="p_hz",
+        ),
+        "sg": _cfg(
+            "https://sg.example.com",
+            "AK_SG",
+            "SECRET_SG",
+            region="ap-southeast-1",
+            description="Singapore",
+            project="p_sg",
+        ),
     }
     built = []
 
@@ -129,14 +142,23 @@ def test_use_config_build_failure_keeps_current():
     def boom_builder(cfg):
         if cfg.maxcompute_endpoint == "https://bad.example.com":
             raise RuntimeError("connect failed")
-        return ClientSet(sdk=MagicMock(), maxcompute_client=MagicMock(),
-                         credential_client=MagicMock(),
-                         default_project=cfg.default_project, namespace_id="")
+        return ClientSet(
+            sdk=MagicMock(),
+            maxcompute_client=MagicMock(),
+            credential_client=MagicMock(),
+            default_project=cfg.default_project,
+            namespace_id="",
+        )
 
     tools = Tools(
-        sdk=MagicMock(), default_project="p_hz", namespace_id="",
-        maxcompute_client=MagicMock(), credential_client=MagicMock(),
-        configs=configs, default_name="hz", client_set_builder=boom_builder,
+        sdk=MagicMock(),
+        default_project="p_hz",
+        namespace_id="",
+        maxcompute_client=MagicMock(),
+        credential_client=MagicMock(),
+        configs=configs,
+        default_name="hz",
+        client_set_builder=boom_builder,
     )
     payload = _payload(tools.call("use_config", {"name": "bad"}))
     assert payload["success"] is False
