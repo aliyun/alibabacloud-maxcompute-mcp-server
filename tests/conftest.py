@@ -17,6 +17,35 @@ from maxcompute_catalog_mcp.tools_common import (
 )
 
 
+@pytest.fixture(autouse=True)
+def clear_host_alibaba_cloud_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep unit tests isolated from the developer's real credential chain."""
+    for name in (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_SECURITY_TOKEN",
+        "ALIBABA_CLOUD_CREDENTIALS_URI",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    import alibabacloud_credentials.utils.auth_util as auth_util
+
+    for attribute in (
+        "environment_access_key_id",
+        "environment_access_key_secret",
+        "environment_security_token",
+        "environment_credentials_uri",
+        "environment_credentials_file",
+        "environment_profile_name",
+        "environment_oidc_provider_arn",
+        "environment_oidc_token_file",
+        "environment_role_arn",
+        "environment_role_session_name",
+    ):
+        monkeypatch.setattr(auth_util, attribute, None)
+    monkeypatch.setattr(auth_util, "environment_cli_profile_disabled", "true")
+    monkeypatch.setattr(auth_util, "environment_ecs_metadata_disabled", "true")
+
+
 class ReadOnlyViolation(RuntimeError):
     """Simulated ODPS server error when DML/DDL is submitted with odps.sql.read.only=true."""
 

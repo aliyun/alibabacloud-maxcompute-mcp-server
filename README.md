@@ -5,7 +5,7 @@
 
 [中文文档](README_ZH.md)
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It exposes Catalog API and compute capabilities as MCP tools so that AI assistants such as Cursor and Claude Code can list projects / schemas / tables, search metadata, estimate and execute SQL, and manage MaxCompute instances over stdio or Streamable HTTP.
+A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launcher for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It can run the original SDK-backed server (`local` mode) or act as a transparent stdio proxy to the hosted MaxCompute MCP service (`remote` mode).
 
 > [!IMPORTANT]
 > MaxCompute Remote MCP Server is the recommended way to use MaxCompute MCP.
@@ -19,13 +19,11 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server for Al
 
 ## Features
 
-- **Catalog**: list projects / schemas / tables; get project, schema, table and partition details.
-- **Search**: metadata search via `search_meta_data` (requires `namespaceId`).
-- **Compute**: SQL cost estimation, read-only SQL execution, instance status and result retrieval.
-- **Table management**: create table, insert values (via PyODPS).
-- **Table metadata**: update comment, labels, lifecycle and column descriptions (`update_table`).
-- **Identity & access**: `check_access` combines identity discovery and grant inspection.
-- **Transports**: stdio (default, for IDE integration) and Streamable HTTP (built-in, no `mcp-proxy` needed).
+- **Backward-compatible configuration**: with no new fields, remote is selected only for a published same-network regional MCP endpoint; every other setup continues through the legacy local SDK.
+- **Transparent remote mode**: stdio MCP messages are relayed to the hosted Streamable HTTP endpoint without rebuilding or renaming the remote tool surface.
+- **Current protocol support**: MCP Python SDK 2.x preserves modern `2026-07-28` request metadata and routing headers while retaining legacy initialize compatibility.
+- **Standard CatalogAPI authentication**: the remote proxy signs the bodyless `mcpAccessToken` operation with the existing credential provider and resolves current AK/STS/ECS RAM Role credentials again on renewal.
+- **Credential isolation**: only a short-lived `mcpc_` bearer is sent to the Gateway; AccessKey secrets and STS credentials never enter MCP messages or URLs, and a selected remote session never falls back to the local SDK.
 
 ## Remote MCP Server (Recommended)
 
@@ -56,20 +54,42 @@ customer data, or sensitive Logview content. Use official Alibaba Cloud support
 or security channels for account-specific permissions, billing, SLA-bound
 incidents, production outages, vulnerabilities, or confidential data cases.
 
-## Local MCP Server (Optional)
+## Local launcher (optional)
 
-The sections below describe the local MCP server in this repository. Use the
-local server when you need self-hosting, stdio integration, local development,
-or direct credential control. For the hosted service, follow the Remote MCP
-documentation above instead.
+The launcher defaults to `default` for upgrades from old configurations. It
+derives the Region and public/VPC network from the selected legacy FE and
+Catalog endpoints, or uses an explicit `region` plus `network` simple config.
+When a published matching MCP endpoint exists and this process uses stdio, it
+first obtains a CatalogAPI token and completes an authenticated MCP
+`initialize`; success selects remote, while token issuance, connection,
+authentication, or initialize failure falls back to the original local
+implementation. Use `--mode local` to pin that implementation.
+
+| Mode | MCP path | Backend | Transport exposed by this process |
+| --- | --- | --- | --- |
+| `default` | Probe remote at startup, then select one path | Remote MCP first; local SDK on initialization failure | stdio; non-stdio stays local |
+| `local` | MCP client → this process → local SDK | MaxCompute SDK / CatalogAPI | stdio or Streamable HTTP |
+| `remote` | MCP client → this process → hosted Gateway | Remote MCP Streamable HTTP | stdio only |
+
+Explicit `remote` mode is fail-closed: CatalogAPI issuance, MCP initialize,
+token renewal, or Gateway transport failures terminate the remote flow.
+`default` falls back only before selection. Once its authenticated initialize
+has selected remote, a later remote-session failure never invokes local SDK
+tools dynamically.
 
 ### Requirements
 
-The local MCP server needs:
+The launcher needs:
 
 - Python 3.10 or newer.
 - [`uv`](https://docs.astral.sh/uv/) for dependency management (recommended).
-- MaxCompute access with an Access Key / STS credentials / credentials URI.
+- Local mode and the local remote proxy both need MaxCompute access through an
+  AccessKey, STS credentials, a credentials URI, ECS RAM Role, or another
+  supported default-credential-chain source.
+- The remote proxy obtains a 300-second `mcpc_` token through the standard
+  signed CatalogAPI operation and stores no refresh token.
+- MCP Python SDK 2.x is installed from the lockfile; modern `2026-07-28` and
+  negotiated legacy stdio clients are both supported.
 
 ### Installation
 
@@ -89,27 +109,58 @@ uv run alibabacloud-maxcompute-mcp-server --help
 
 ### Configuration
 
+Runtime values use this precedence: command line, environment variables, JSON,
+then defaults. The mode is `default` when no source selects one.
+
+| Purpose | CLI | Environment | JSON |
+| --- | --- | --- | --- |
+| Runtime mode | `--mode default\|remote\|local` | `MAXCOMPUTE_MCP_MODE` | `mode` |
+| Remote MCP URL | `--remote-url` | `MAXCOMPUTE_REMOTE_MCP_URL` | `remote.url` |
+| Startup profile | `--profile` | `MAXCOMPUTE_MCP_PROFILE` | `profile` |
+| Config file | `--config` | `MAXCOMPUTE_CATALOG_CONFIG` | n/a |
+
+The profile selects the endpoint, CatalogAPI client, and credentials used for
+token issuance in remote mode as well as the local SDK setup in local mode.
+
 Copy the public example and fill in real values locally:
 
 ```bash
 cp config.example.json config.json
-# edit config.json with real endpoint / project / credentials
+# edit config.json with the real Region / network / project / credentials
 ```
 
 `config.json` is git-ignored by default and must not be committed.
 
-#### Configuration fields
+#### MaxCompute configuration fields
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `maxcompute.maxcompute_endpoint` | yes | MaxCompute service endpoint, e.g. `https://service.cn-hangzhou.maxcompute.aliyun.com/api`. |
-| `maxcompute.catalogapi_endpoint` | optional | Catalog API endpoint. When absent it is derived from `maxcompute_endpoint`. |
+| `maxcompute.region` | with `network` | Region used for simple endpoint synthesis and remote selection, e.g. `cn-hangzhou`. |
+| `maxcompute.network` | with `region` | `public` or `vpc`. Together with `region`, this replaces explicit FE/Catalog endpoint configuration. |
+| `maxcompute.maxcompute_endpoint` | unless `region` + `network` | MaxCompute FE endpoint, e.g. `https://service.cn-hangzhou.maxcompute.aliyun.com/api`. |
+| `maxcompute.catalogapi_endpoint` | optional | Catalog API endpoint. Simple config synthesizes it; legacy config otherwise resolves it from `maxcompute_endpoint` when absent. |
 | `maxcompute.defaultProject` | optional | Default project name used as the execution context. |
 | `maxcompute.namespaceId` | optional | Main account UID required by `search_meta_data`. |
 | `maxcompute.protocol` | optional | `https` (default) or `http`. |
 | `maxcompute.accessKeyId` / `accessKeySecret` | optional | Static credentials for development. Prefer `ALIBABA_CLOUD_CREDENTIALS_URI` in production. |
 
-#### Credential precedence
+The simplest endpoint configuration is:
+
+```json
+{
+  "maxcompute": {
+    "region": "cn-hangzhou",
+    "network": "public",
+    "defaultProject": "<DEFAULT_PROJECT_NAME>"
+  }
+}
+```
+
+`network: "vpc"` synthesizes the corresponding intranet FE and Catalog
+endpoints. Remote MCP URLs are never synthesized: `default` still selects only
+an endpoint from the published registry below.
+
+#### Local-mode credential precedence
 
 1. `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` environment variables (optionally with `ALIBABA_CLOUD_SECURITY_TOKEN`).
 2. `ALIBABA_CLOUD_CREDENTIALS_URI` pointing to a local credential provider.
@@ -122,15 +173,20 @@ You can skip the JSON file entirely and configure the server through environment
 
 | Variable | Purpose |
 | --- | --- |
+| `MAXCOMPUTE_MCP_MODE` | `default`, `remote`, or `local`; omitted means `default`. |
+| `MAXCOMPUTE_REMOTE_MCP_URL` | Optional override. It must match the MaxCompute endpoint network; VPC must also use the same Region. |
+| `MAXCOMPUTE_MCP_PROFILE` | Named profile selected for local or remote startup. |
 | `MAXCOMPUTE_ENDPOINT` | MaxCompute service endpoint. |
 | `MAXCOMPUTE_CATALOG_API_ENDPOINT` | Optional Catalog API endpoint override. |
+| `MAXCOMPUTE_REGION` | Region for simple endpoint configuration or validation. |
+| `MAXCOMPUTE_NETWORK` | `public` or `vpc`; requires `MAXCOMPUTE_REGION`. |
 | `MAXCOMPUTE_DEFAULT_PROJECT` | Default project name. |
 | `MAXCOMPUTE_NAMESPACE_ID` | Namespace ID for `search_meta_data`. |
 | `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | Static credentials. |
 | `ALIBABA_CLOUD_SECURITY_TOKEN` | Optional STS token. |
 | `ALIBABA_CLOUD_CREDENTIALS_URI` | Credential provider URI. |
 
-#### Named configs (runtime switching)
+#### Named local configs (runtime switching)
 
 To switch between regions, endpoints, projects, or identities without restarting the MCP server, create a local multi-config file such as `config.multi.json` and point `MAXCOMPUTE_CATALOG_CONFIG` to it:
 
@@ -173,29 +229,116 @@ To switch between regions, endpoints, projects, or identities without restarting
 }
 ```
 
-The server starts with `default` (or the first config when `default` is omitted). Use the session tools `list_configs`, `get_current_config`, and `use_config` to inspect and switch the active config at runtime. These tools never return AccessKey IDs, AccessKey secrets, or STS tokens.
+The server starts with `default` (or the first config when `default` is omitted).
+In local mode, use the session tools `list_configs`, `get_current_config`, and
+`use_config` to inspect and switch the active config at runtime. These tools
+never return AccessKey IDs, AccessKey secrets, or STS tokens. Use
+`--profile <name>` or `MAXCOMPUTE_MCP_PROFILE=<name>` to select a config at
+startup in either mode.
 
-Each named config must provide `maxcompute_endpoint`. If `catalogapi_endpoint` is omitted, also provide `defaultProject` so the server can resolve the Catalog API endpoint through MaxCompute.
+Each named config must provide either `maxcompute_endpoint` or `region` plus
+`network`. If a legacy config omits `catalogapi_endpoint`, also provide
+`defaultProject` so the server can resolve the Catalog API endpoint through
+MaxCompute.
 
-The active config is process-global. Runtime switching is best suited to stdio / single-client usage. In shared Streamable HTTP mode, all connected clients share the same active config, so a `use_config` call from one client affects the others.
+The active local config is process-global. Runtime switching is best suited to
+stdio / single-client usage. In shared Streamable HTTP mode, all connected
+clients share the same active config, so a `use_config` call from one client
+affects the others. Remote mode fixes one profile at startup and does not expose
+local session-switching tools.
+
+#### Default selection and remote overrides
+
+Released top-level `maxcompute`, top-level `odps`, named `configs`, and
+environment-only configurations all continue to load. For stdio, `default`
+uses only this explicit published registry and never constructs an unlisted
+host:
+
+| MaxCompute network | Region | Automatically selected MCP endpoint |
+| --- | --- | --- |
+| public | `cn-hangzhou` | `https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp` |
+| public | `cn-hongkong` | `https://mcp.cn-hongkong.maxcompute.aliyun.com/mcp` |
+| public | `ap-southeast-1` | `https://mcp.ap-southeast-1.maxcompute.aliyun.com/mcp` |
+| VPC | `cn-hangzhou` | `https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp` |
+| VPC | `cn-hongkong` | `https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp` |
+| VPC | `ap-southeast-1` | `https://mcp.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp` |
+
+For legacy configuration, recognized FE and Catalog endpoints both contribute
+Region/network evidence. Public endpoints select public MCP; recognized VPC or
+intranet endpoints select VPC MCP. When both endpoints are recognized, they
+must identify the same Region and network. Conflicting endpoints never select
+remote, and explicit `region`/`network` values that contradict a recognized
+endpoint are rejected as invalid configuration.
+
+A VPC configuration never selects public MCP or crosses Regions. A Region with
+no listed matching MCP endpoint, only custom or historical endpoints, conflicting
+FE/Catalog evidence, or a local HTTP transport stays on legacy local behavior
+under `default`; explicit `remote` mode fails closed.
+
+The `mcp` versus `mcp-intl` distinction selects the browser OAuth entry when an
+MCP client connects directly to Remote MCP. This local remote proxy instead
+signs CatalogAPI with AK/STS and sends the issued `mcpc_` token, so it does not
+enter OAuth; legacy FE, Catalog, and Tunnel endpoints neither contain nor
+distinguish the account site. Consequently, `default` does not infer China site
+versus International site. It selects the stable default above from only the
+Region and public/VPC network. A published same-network `mcp-intl` URL is an
+equivalent explicit `remote.url` override; VPC must still use the same Region.
+
+A minimal remote override reuses the existing MaxCompute configuration and
+credentials:
+
+```json
+{
+  "mode": "remote",
+  "remote": {
+    "url": "https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp"
+  },
+  "maxcompute": {
+    "region": "cn-hangzhou",
+    "network": "public",
+    "accessKeyId": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
+    "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>"
+  }
+}
+```
+
+The remote URL must be an exact `/mcp` resource without userinfo, query, or
+fragment. The proxy rejects redirects, ignores ambient HTTP proxy variables,
+and renews the short-lived bearer through CatalogAPI single-flight. The
+CatalogAPI operation has no business body; scope and TTL are server-owned.
 
 ### Running
 
-#### stdio (default)
+#### Force local mode, stdio
 
 ```bash
-uv run alibabacloud-maxcompute-mcp-server
+uv run alibabacloud-maxcompute-mcp-server --mode local
 ```
 
-#### Streamable HTTP
+#### Local mode, Streamable HTTP
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --transport http --host 127.0.0.1 --port 8000
 ```
 
+#### Remote mode, stdio proxy
+
+```bash
+uv run alibabacloud-maxcompute-mcp-server --config /path/to/config.json
+```
+
+Known endpoints need no site field under `default`. Add
+`--mode remote --remote-url https://<REMOTE_MCP_HOST>/mcp` only to override the
+default entry.
+
+Remote mode rejects `--transport http` and `--transport streamable-http`.
+
 ### MCP tools
 
-All tools return JSON in an MCP text response. Check `success` first, then read `data`, `summary`, or `error`.
+Remote mode transparently exposes the tool list and contracts advertised by the
+selected Gateway. Local mode preserves the released SDK-backed tool surface.
+Local tools return JSON in an MCP text response; check `success` first, then
+read `data`, `summary`, or `error`.
 
 | Category | Tools | Purpose |
 | --- | --- | --- |
@@ -207,10 +350,13 @@ All tools return JSON in an MCP text response. Check `success` first, then read 
 
 Notes:
 
-- `execute_sql` is read-only by design. The server validates SQL client-side and also submits jobs with the MaxCompute read-only hint.
-- For SQL table references, call `get_table_schema` first and use the returned `sqlTableRef`; this handles two-level and three-level project naming.
+- `execute_sql` is read-only by design. The server validates SQL client-side
+  and also submits jobs with the MaxCompute read-only hint.
+- For SQL table references, call `get_table_schema` first and use the returned
+  `sqlTableRef`; this handles two-level and three-level project naming.
 - `search_meta_data` requires `namespaceId` / `MAXCOMPUTE_NAMESPACE_ID`.
-- Large query results can be streamed to a local `file://` `output_uri`; otherwise responses are returned inline and may be truncated.
+- Large query results can be streamed to a local `file://` `output_uri`;
+  otherwise responses are returned inline and may be truncated.
 
 ### MCP client setup
 
@@ -249,9 +395,9 @@ Notes:
         "alibabacloud-maxcompute-mcp-server"
       ],
       "env": {
-        "MAXCOMPUTE_ENDPOINT": "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+        "MAXCOMPUTE_REGION": "cn-hangzhou",
+        "MAXCOMPUTE_NETWORK": "public",
         "MAXCOMPUTE_DEFAULT_PROJECT": "<DEFAULT_PROJECT_NAME>",
-        "MAXCOMPUTE_NAMESPACE_ID": "<ALIBABACLOUD_ACCOUNT_UID>",
         "ALIBABA_CLOUD_ACCESS_KEY_ID": "<ALIBABA_CLOUD_ACCESS_KEY_ID>",
         "ALIBABA_CLOUD_ACCESS_KEY_SECRET": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>"
       }
@@ -260,9 +406,39 @@ Notes:
 }
 ```
 
+#### Cursor / Claude Code (remote mode through local stdio)
+
+```json
+{
+  "mcpServers": {
+    "alibabacloud-maxcompute-mcp-server": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/alibabacloud-maxcompute-mcp-server",
+        "run",
+        "alibabacloud-maxcompute-mcp-server",
+        "--mode",
+        "remote",
+        "--remote-url",
+        "https://<REMOTE_MCP_HOST>/mcp"
+      ],
+      "env": {
+        "MAXCOMPUTE_CATALOG_CONFIG": "/absolute/path/to/alibabacloud-maxcompute-mcp-server/config.json"
+      }
+    }
+  }
+}
+```
+
+For a published same-network regional endpoint, omit `--mode` and
+`--remote-url` and let `default` probe it. Do not put AccessKey IDs, secrets, STS
+tokens, or bearer tokens in MCP client arguments.
+
 #### Streamable HTTP
 
-Start the server (see above), then point your MCP client at `http://127.0.0.1:8000/mcp`.
+This listener is available only in local mode. Start the server (see above),
+then point your MCP client at `http://127.0.0.1:8000/mcp`.
 
 ### Development
 

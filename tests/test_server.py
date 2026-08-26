@@ -3,21 +3,34 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from maxcompute_catalog_mcp.config import MaxComputeCatalogConfig
+from maxcompute_catalog_mcp.runtime_config import (
+    RemoteRuntimeConfig,
+    RuntimeConfig,
+    RuntimeMode,
+)
 from maxcompute_catalog_mcp.server import (
+    RemoteInitializationError,
     _build_mcp_server,
     _parse_args,
+    _parse_server_options,
+    _run_default_stdio,
+    _run_forced_remote_stdio,
     _run_http,
     _run_stdio,
+    build_remote_token_provider,
     build_tools,
     main,
 )
-
+from maxcompute_catalog_mcp.tools import Tools
+from maxcompute_catalog_mcp.tools_common import ToolSpec
 
 # ---------------------------------------------------------------------------
 # _parse_args() tests
@@ -53,6 +66,267 @@ class TestParseArgs:
         _, transport, _, _ = _parse_args()
         assert transport == "streamable-http"
 
+    def test_remote_runtime_cli_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "alibabacloud-maxcompute-mcp-server",
+                "--mode",
+                "remote",
+                "--remote-url",
+                "https://remote.example.com/mcp",
+                "--profile",
+                "local-dev",
+            ],
+        )
+
+        options = _parse_server_options()
+
+        assert options.mode == "remote"
+        assert options.remote_url == "https://remote.example.com/mcp"
+        assert options.profile == "local-dev"
+
+    @pytest.mark.parametrize("mode", ["default", "remote", "local"])
+    def test_exact_runtime_modes(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mode: str,
+    ) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["alibabacloud-maxcompute-mcp-server", "--mode", mode],
+        )
+
+        assert _parse_server_options().mode == mode
+
+    def test_obsolete_auto_runtime_mode_is_rejected(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["alibabacloud-maxcompute-mcp-server", "--mode", "auto"],
+        )
+
+        with pytest.raises(SystemExit):
+            _parse_server_options()
+
+
+def test_main_remote_mode_builds_token_provider_but_not_local_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remote startup builds Catalog auth but never registers legacy tools."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "mode": "remote",
+                "remote": {"url": "http://127.0.0.1:8080/mcp"},
+                "maxcompute": {
+                    "maxcompute_endpoint": (
+                        "https://service.cn-hangzhou.maxcompute.aliyun.com/api"
+                    ),
+                    "catalogapi_endpoint": "https://catalog.example.com",
+                    "accessKeyId": "fixture-ak",
+                    "accessKeySecret": "fixture-sk",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "alibabacloud-maxcompute-mcp-server",
+            "--config",
+            str(config_path),
+        ],
+    )
+
+    token_provider = MagicMock()
+    with patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock, \
+         patch(
+             "maxcompute_catalog_mcp.server.build_remote_token_provider",
+             return_value=token_provider,
+         ) as build_provider_mock, \
+         patch(
+             "maxcompute_catalog_mcp.server._run_remote_proxy",
+             new_callable=AsyncMock,
+         ) as run_remote_mock, \
+         patch(
+             "maxcompute_catalog_mcp.server._probe_remote_mcp",
+             new_callable=AsyncMock,
+         ) as probe_remote_mock:
+        main()
+
+    build_tools_mock.assert_not_called()
+    build_provider_mock.assert_called_once_with(str(config_path), "default")
+    probe_remote_mock.assert_awaited_once()
+    run_remote_mock.assert_awaited_once()
+    assert run_remote_mock.await_args.args[1] is token_provider
+
+
+class TestDefaultMode:
+    @staticmethod
+    def _runtime() -> RuntimeConfig:
+        return RuntimeConfig(
+            mode=RuntimeMode.DEFAULT,
+            profile="daily",
+            remote=RemoteRuntimeConfig(
+                url="https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp",
+            ),
+        )
+
+    def test_successful_remote_initialize_selects_transparent_proxy(self) -> None:
+        provider = MagicMock()
+        with patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=provider,
+        ) as build_provider_mock, patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+        ) as probe_mock, patch(
+            "maxcompute_catalog_mcp.server._run_remote_proxy",
+            new_callable=AsyncMock,
+        ) as remote_mock, patch(
+            "maxcompute_catalog_mcp.server.build_tools",
+        ) as build_tools_mock:
+            asyncio.run(_run_default_stdio(self._runtime(), "/fake/config.json"))
+
+        build_provider_mock.assert_called_once_with("/fake/config.json", "daily")
+        probe_mock.assert_awaited_once_with(self._runtime().remote, provider)
+        remote_mock.assert_awaited_once_with(self._runtime().remote, provider)
+        build_tools_mock.assert_not_called()
+
+    def test_catalog_token_failure_falls_back_to_original_local_server(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        local_tools = MagicMock()
+        with patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            side_effect=RuntimeError("token issuance failed"),
+        ), patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+        ) as probe_mock, patch(
+            "maxcompute_catalog_mcp.server.build_tools",
+            return_value=local_tools,
+        ) as build_tools_mock, patch(
+            "maxcompute_catalog_mcp.server._run_stdio",
+            new_callable=AsyncMock,
+        ) as local_mock:
+            asyncio.run(_run_default_stdio(self._runtime(), "/fake/config.json"))
+
+        probe_mock.assert_not_awaited()
+        build_tools_mock.assert_called_once_with(
+            "/fake/config.json",
+            profile="daily",
+        )
+        local_mock.assert_awaited_once_with(local_tools)
+        assert "falling back to local mode" in caplog.text
+
+    def test_remote_initialize_failure_falls_back_to_original_local_server(
+        self,
+    ) -> None:
+        provider = MagicMock()
+        local_tools = MagicMock()
+        with patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=provider,
+        ), patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("gateway authentication failed"),
+        ), patch(
+            "maxcompute_catalog_mcp.server._run_remote_proxy",
+            new_callable=AsyncMock,
+        ) as remote_mock, patch(
+            "maxcompute_catalog_mcp.server.build_tools",
+            return_value=local_tools,
+        ), patch(
+            "maxcompute_catalog_mcp.server._run_stdio",
+            new_callable=AsyncMock,
+        ) as local_mock:
+            asyncio.run(_run_default_stdio(self._runtime(), None))
+
+        remote_mock.assert_not_awaited()
+        local_mock.assert_awaited_once_with(local_tools)
+
+    def test_remote_runtime_failure_after_selection_does_not_fall_back(
+        self,
+    ) -> None:
+        provider = MagicMock()
+        with patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=provider,
+        ), patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+        ), patch(
+            "maxcompute_catalog_mcp.server._run_remote_proxy",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("remote session lost"),
+        ), patch(
+            "maxcompute_catalog_mcp.server.build_tools",
+        ) as build_tools_mock, pytest.raises(
+            RuntimeError,
+            match="remote session lost",
+        ):
+            asyncio.run(_run_default_stdio(self._runtime(), None))
+
+        build_tools_mock.assert_not_called()
+
+
+def test_forced_remote_initialize_failure_is_fail_closed() -> None:
+    config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
+    provider = MagicMock()
+    with patch(
+        "maxcompute_catalog_mcp.server._probe_remote_mcp",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("unauthorized"),
+    ), patch(
+        "maxcompute_catalog_mcp.server._run_remote_proxy",
+        new_callable=AsyncMock,
+    ) as remote_mock, pytest.raises(
+        RemoteInitializationError,
+        match="failed in remote mode",
+    ):
+        asyncio.run(_run_forced_remote_stdio(config, provider))
+
+    remote_mock.assert_not_awaited()
+
+
+@patch("maxcompute_catalog_mcp.server.build_client_set")
+@patch("maxcompute_catalog_mcp.server.load_configs")
+def test_build_remote_token_provider_reuses_selected_catalog_sdk(
+    mock_load,
+    mock_build,
+) -> None:
+    config = MaxComputeCatalogConfig(
+        catalogapi_endpoint="https://catalog.example.com",
+        maxcompute_endpoint=(
+            "https://service.cn-hangzhou.maxcompute.aliyun.com/api"
+        ),
+        access_key_id="fixture-ak",
+        access_key_secret="fixture-sk",
+    )
+    catalog_client = MagicMock()
+    client_set = MagicMock()
+    client_set.sdk.client = catalog_client
+    mock_load.return_value = ({"daily": config}, "daily")
+    mock_build.return_value = client_set
+
+    provider = build_remote_token_provider("/fake/config.json", "daily")
+
+    assert provider._client._catalog_client is catalog_client
+    mock_build.assert_called_once_with(config)
+
 
 # ---------------------------------------------------------------------------
 # build_tools() tests
@@ -67,21 +341,27 @@ class TestBuildTools:
     """
 
     def _cfg(self, **kw):
-        base = dict(
-            catalogapi_endpoint="https://catalog.example.com",
-            maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
-            default_project="proj", namespace_id="ns",
-        )
+        base = {
+            "catalogapi_endpoint": "https://catalog.example.com",
+            "maxcompute_endpoint": "https://mc.example.com",
+            "access_key_id": "AK",
+            "access_key_secret": "SK",
+            "default_project": "proj",
+            "namespace_id": "ns",
+        }
         base.update(kw)
         return MaxComputeCatalogConfig(**base)
 
     def _client_set(self, **kw):
         from maxcompute_catalog_mcp.client_factory import ClientSet
-        base = dict(
-            sdk=MagicMock(), maxcompute_client=MagicMock(), credential_client=MagicMock(),
-            default_project="proj", namespace_id="ns",
-        )
+
+        base = {
+            "sdk": MagicMock(),
+            "maxcompute_client": MagicMock(),
+            "credential_client": MagicMock(),
+            "default_project": "proj",
+            "namespace_id": "ns",
+        }
         base.update(kw)
         return ClientSet(**base)
 
@@ -101,6 +381,10 @@ class TestBuildTools:
         assert tools._default_name == "default"
         assert tools._current_name == "default"
         assert "default" in tools._configs
+        assert isinstance(tools, Tools)
+        names = {spec.name for spec in tools.specs()}
+        assert "execute_sql" in names
+        assert "list_configs" in names
 
     @patch("maxcompute_catalog_mcp.server.build_client_set")
     @patch("maxcompute_catalog_mcp.server.load_configs")
@@ -139,6 +423,27 @@ class TestBuildTools:
         assert tools._default_name == "b" and tools._current_name == "b"
         assert set(tools._configs) == {"a", "b"}
 
+    @patch("maxcompute_catalog_mcp.server.build_client_set")
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_profile_selects_named_config_at_startup(self, mock_load, mock_build) -> None:
+        cfg_a = self._cfg(maxcompute_endpoint="https://a.example.com")
+        cfg_b = self._cfg(maxcompute_endpoint="https://b.example.com")
+        mock_load.return_value = ({"a": cfg_a, "b": cfg_b}, "a")
+        mock_build.return_value = self._client_set()
+
+        tools = build_tools(profile="b")
+
+        assert mock_build.call_args.args[0] is cfg_b
+        assert tools._default_name == "b"
+        assert tools._current_name == "b"
+
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_unknown_profile_exits_before_client_construction(self, mock_load) -> None:
+        mock_load.return_value = ({"a": self._cfg()}, "a")
+
+        with pytest.raises(SystemExit, match="Unknown MaxCompute profile"):
+            build_tools(profile="missing")
+
     @patch("maxcompute_catalog_mcp.server.load_configs")
     def test_invalid_config_exits(self, mock_load) -> None:
         mock_load.side_effect = ValueError("default config 'x' not found")
@@ -163,25 +468,19 @@ class TestBuildTools:
 class TestBuildMcpServer:
     def test_list_tools_handler_invokes_tools_specs(self) -> None:
         """The registered ListToolsRequest handler must delegate to tools.specs()."""
-        from mcp import types as mcp_types
 
-        spec1 = MagicMock(description="desc1", input_schema={"type": "object"})
-        spec1.name = "tool_one"
-        spec2 = MagicMock(description="desc2", input_schema={"type": "object"})
-        spec2.name = "tool_two"
+        spec1 = ToolSpec("tool_one", "desc1", {"type": "object"})
+        spec2 = ToolSpec("tool_two", "desc2", {"type": "object"})
 
         mock_tools = MagicMock()
         mock_tools.specs.return_value = [spec1, spec2]
 
         server = _build_mcp_server(mock_tools)
-        assert mcp_types.ListToolsRequest in server.request_handlers
+        entry = server.get_request_handler("tools/list")
+        assert entry is not None
 
-        handler = server.request_handlers[mcp_types.ListToolsRequest]
-        req = mcp_types.ListToolsRequest(method="tools/list")
-        result = asyncio.run(handler(req))
-        # result is ServerResult wrapping ListToolsResult
-        tools_result = result.root
-        names = [t.name for t in tools_result.tools]
+        result = asyncio.run(entry.handler(MagicMock(), None))
+        names = [tool.name for tool in result.tools]
         assert names == ["tool_one", "tool_two"]
         mock_tools.specs.assert_called_once()
 
@@ -189,8 +488,7 @@ class TestBuildMcpServer:
         """CallToolRequest handler must call tools.call and return TextContent list."""
         from mcp import types as mcp_types
 
-        spec = MagicMock(description="d", input_schema={"type": "object"})
-        spec.name = "echo"
+        spec = ToolSpec("echo", "d", {"type": "object"})
         mock_tools = MagicMock()
         mock_tools.specs.return_value = [spec]
         mock_tools.call.return_value = {
@@ -198,30 +496,29 @@ class TestBuildMcpServer:
         }
 
         server = _build_mcp_server(mock_tools)
-        assert mcp_types.CallToolRequest in server.request_handlers
+        entry = server.get_request_handler("tools/call")
+        assert entry is not None
 
-        # Prime the tool cache by calling list_tools first (SDK validates against it)
-        list_handler = server.request_handlers[mcp_types.ListToolsRequest]
-        asyncio.run(list_handler(mcp_types.ListToolsRequest(method="tools/list")))
-
-        call_handler = server.request_handlers[mcp_types.CallToolRequest]
-        req = mcp_types.CallToolRequest(
-            method="tools/call",
-            params=mcp_types.CallToolRequestParams(name="echo", arguments={"x": 1}),
+        result = asyncio.run(
+            entry.handler(
+                MagicMock(),
+                mcp_types.CallToolRequestParams(
+                    name="echo",
+                    arguments={"x": 1},
+                ),
+            )
         )
-        result = asyncio.run(call_handler(req))
-        call_result = result.root
         mock_tools.call.assert_called_once_with("echo", {"x": 1})
-        texts = [c.text for c in call_result.content if c.type == "text"]
+        texts = [content.text for content in result.content if content.type == "text"]
         assert texts == ["hello"]
 
     def test_call_tool_handler_jsonrpc_error_propagates(self) -> None:
         """JsonRpcError from tools.call is converted to ValueError (ToolError)."""
         from mcp import types as mcp_types
+
         from maxcompute_catalog_mcp.mcp_protocol import JsonRpcError
 
-        spec = MagicMock(description="d", input_schema={"type": "object"})
-        spec.name = "boom"
+        spec = ToolSpec("boom", "d", {"type": "object"})
         mock_tools = MagicMock()
         mock_tools.specs.return_value = [spec]
         mock_tools.call.side_effect = JsonRpcError(
@@ -230,21 +527,20 @@ class TestBuildMcpServer:
 
         server = _build_mcp_server(mock_tools)
 
-        # Prime the tool cache
-        list_handler = server.request_handlers[mcp_types.ListToolsRequest]
-        asyncio.run(list_handler(mcp_types.ListToolsRequest(method="tools/list")))
-
-        call_handler = server.request_handlers[mcp_types.CallToolRequest]
-        req = mcp_types.CallToolRequest(
-            method="tools/call",
-            params=mcp_types.CallToolRequestParams(name="boom", arguments={}),
+        call_entry = server.get_request_handler("tools/call")
+        assert call_entry is not None
+        call_result = asyncio.run(
+            call_entry.handler(
+                MagicMock(),
+                mcp_types.CallToolRequestParams(name="boom", arguments={}),
+            )
         )
-        # SDK wraps ValueError from user handler into a CallToolResult with isError=True
-        result = asyncio.run(call_handler(req))
-        call_result = result.root
-        assert call_result.isError is True
-        # Error text should contain the JsonRpcError message
-        joined = " ".join(c.text for c in call_result.content if c.type == "text")
+        assert call_result.is_error is True
+        joined = " ".join(
+            content.text
+            for content in call_result.content
+            if content.type == "text"
+        )
         assert "bad input" in joined
 
 
@@ -290,50 +586,83 @@ class TestRunHttp:
         """_run_http builds MCP server, creates ASGI app, and calls uvicorn.run.
 
         Asserts on the full wiring contract:
-          - SessionManager must be stateless=True (critical for correctness)
+          - MCP 2.x app must be stateless (critical for correctness)
           - Route is mounted at /mcp (public contract)
           - uvicorn.run receives host/port via kwargs
         """
         mock_tools = MagicMock()
 
         mock_uvicorn = MagicMock()
-        mock_sm_cls = MagicMock()
-        mock_asgi_cls = MagicMock()
-        mock_starlette_cls = MagicMock()
-        mock_mount = MagicMock()
-        mock_route = MagicMock()
 
         fake_http_mods = {
             "uvicorn": mock_uvicorn,
-            "starlette.applications": MagicMock(Starlette=mock_starlette_cls),
-            "starlette.routing": MagicMock(Mount=mock_mount, Route=mock_route),
-            "mcp.server.fastmcp.server": MagicMock(StreamableHTTPASGIApp=mock_asgi_cls),
-            "mcp.server.streamable_http_manager": MagicMock(StreamableHTTPSessionManager=mock_sm_cls),
         }
 
         with patch("maxcompute_catalog_mcp.server._build_mcp_server") as mock_build, \
              patch.dict("sys.modules", fake_http_mods):
-            mock_build.return_value = MagicMock()
+            mock_server = MagicMock()
+            mock_build.return_value = mock_server
 
             _run_http(mock_tools, host="0.0.0.0", port=9999)
 
             mock_build.assert_called_once_with(mock_tools)
-
-            # SessionManager MUST be stateless (otherwise concurrent requests interfere)
-            assert mock_sm_cls.call_args.kwargs["stateless"] is True
-
-            # Route mounted at /mcp with GET/POST/DELETE methods
-            mount_call = mock_mount.call_args
-            assert mount_call.args[0] == "/mcp"
-            route_call = mock_route.call_args
-            assert route_call.args[0] == "/"
-            assert set(route_call.kwargs["methods"]) == {"GET", "POST", "DELETE"}
+            mock_server.streamable_http_app.assert_called_once_with(
+                streamable_http_path="/mcp",
+                stateless_http=True,
+                host="0.0.0.0",
+            )
 
             # uvicorn.run called with exact host/port via kwargs
-            mock_uvicorn.run.assert_called_once()
-            call_args = mock_uvicorn.run.call_args
-            assert call_args.kwargs["host"] == "0.0.0.0"
-            assert call_args.kwargs["port"] == 9999
+            mock_uvicorn.run.assert_called_once_with(
+                mock_server.streamable_http_app.return_value,
+                host="0.0.0.0",
+                port=9999,
+            )
+
+    def test_run_http_serves_modern_discovery_at_exact_mcp_path(self) -> None:
+        """The MCP 2.x ASGI wiring handles a real modern request at /mcp."""
+        from starlette.testclient import TestClient
+
+        mock_tools = MagicMock()
+        mock_tools.specs.return_value = []
+
+        with patch("uvicorn.run") as run_mock:
+            _run_http(mock_tools, host="127.0.0.1", port=8000)
+
+        app = run_mock.call_args.args[0]
+        with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+            response = client.post(
+                "/mcp",
+                headers={
+                    "Accept": "application/json, text/event-stream",
+                    "Content-Type": "application/json",
+                    "MCP-Protocol-Version": "2026-07-28",
+                    "Mcp-Method": "server/discover",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "server/discover",
+                    "params": {
+                        "_meta": {
+                            "io.modelcontextprotocol/protocolVersion": (
+                                "2026-07-28"
+                            ),
+                            "io.modelcontextprotocol/clientCapabilities": {},
+                            "io.modelcontextprotocol/clientInfo": {
+                                "name": "local-http-test",
+                                "version": "1.0.0",
+                            },
+                        }
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["jsonrpc"] == "2.0"
+        assert payload["id"] == 1
+        assert "2026-07-28" in payload["result"]["supportedVersions"]
 
 
 # ---------------------------------------------------------------------------

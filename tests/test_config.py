@@ -33,6 +33,24 @@ def _cfg(
     )
 
 
+def test_config_repr_redacts_credentials() -> None:
+    """Incidental config formatting does not expose AK, SK, or STS material."""
+    cfg = MaxComputeCatalogConfig(
+        catalogapi_endpoint="catalog.example.com",
+        maxcompute_endpoint="https://mc.example.com/api",
+        access_key_id="fixture-access-key-id",
+        access_key_secret="fixture-access-key-secret",
+        security_token="fixture-security-token",
+    )
+
+    rendered = repr(cfg)
+
+    assert "fixture-access-key-id" not in rendered
+    assert "fixture-access-key-secret" not in rendered
+    assert "fixture-security-token" not in rendered
+    assert "mc.example.com" in rendered
+
+
 # ---------------------------------------------------------------------------
 # split_scheme() tests
 # ---------------------------------------------------------------------------
@@ -295,6 +313,113 @@ def test_load_config_missing_endpoint_raises(tmp_path: Path) -> None:
         load_config(str(cfg_file))
 
 
+@pytest.mark.parametrize(
+    ("network", "maxcompute_endpoint", "catalogapi_endpoint"),
+    [
+        (
+            "public",
+            "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+            "https://catalogapi.cn-hangzhou.maxcompute.aliyun.com",
+        ),
+        (
+            "vpc",
+            "https://service.cn-hangzhou-intranet.maxcompute.aliyun-inc.com/api",
+            "https://catalogapi.cn-hangzhou-intranet.maxcompute.aliyun-inc.com",
+        ),
+    ],
+)
+def test_simple_region_network_config_synthesizes_matching_endpoints(
+    tmp_path: Path,
+    network: str,
+    maxcompute_endpoint: str,
+    catalogapi_endpoint: str,
+) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "region": "cn-hangzhou",
+                    "network": network,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_file))
+
+    assert cfg.region == "cn-hangzhou"
+    assert cfg.network == network
+    assert cfg.maxcompute_endpoint == maxcompute_endpoint
+    assert cfg.catalogapi_endpoint == catalogapi_endpoint
+
+
+def test_simple_region_network_environment_config_synthesizes_vpc_endpoints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAXCOMPUTE_REGION", "ap-southeast-1")
+    monkeypatch.setenv("MAXCOMPUTE_NETWORK", "vpc")
+
+    cfg = load_config(str(tmp_path / "nonexistent.json"))
+
+    assert cfg.network == "vpc"
+    assert cfg.maxcompute_endpoint == (
+        "https://service.ap-southeast-1-intranet.maxcompute.aliyun-inc.com/api"
+    )
+    assert cfg.catalogapi_endpoint == (
+        "https://catalogapi.ap-southeast-1-intranet.maxcompute.aliyun-inc.com"
+    )
+
+
+def test_simple_config_rejects_invalid_network(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "region": "cn-hangzhou",
+                    "network": "private",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="network"):
+        load_config(str(cfg_file))
+
+
+def test_simple_config_requires_region_with_network(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(
+        json.dumps({"maxcompute": {"network": "public"}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="region is required"):
+        load_config(str(cfg_file))
+
+
+def test_simple_config_rejects_invalid_region(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "region": "cn_hangzhou",
+                    "network": "public",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="region is invalid"):
+        load_config(str(cfg_file))
+
+
 def test_load_config_no_file_env_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Load config without file, env-only."""
     # Point to a non-existent file
@@ -419,6 +544,36 @@ def test_resolve_endpoint_content_decode_fallback() -> None:
 
 
 class TestLoadConfigs:
+    def test_named_simple_config_synthesizes_matching_endpoints(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        p = tmp_path / "config.json"
+        p.write_text(
+            json.dumps(
+                {
+                    "configs": {
+                        "hz-vpc": {
+                            "region": "cn-hangzhou",
+                            "network": "vpc",
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        configs, default_name = load_configs(str(p))
+
+        assert default_name == "hz-vpc"
+        assert configs["hz-vpc"].network == "vpc"
+        assert configs["hz-vpc"].maxcompute_endpoint == (
+            "https://service.cn-hangzhou-intranet.maxcompute.aliyun-inc.com/api"
+        )
+        assert configs["hz-vpc"].catalogapi_endpoint == (
+            "https://catalogapi.cn-hangzhou-intranet.maxcompute.aliyun-inc.com"
+        )
+
     def test_multi_named_configs(self, tmp_path: Path) -> None:
         p = tmp_path / "config.json"
         p.write_text(json.dumps({
