@@ -5,19 +5,49 @@ import asyncio
 import logging
 import os
 import sys
-from typing import Optional
+from dataclasses import dataclass
+
+from mcp.server import Server as McpServer
 
 from .client_factory import build_client_set
 from .config import load_configs
 from .mcp_protocol import JsonRpcError
+from .remote_auth import (
+    CatalogAccessTokenProvider,
+    CatalogMCPAccessTokenClient,
+)
+from .runtime_config import (
+    RemoteRuntimeConfig,
+    RuntimeConfig,
+    RuntimeMode,
+    load_runtime_config,
+)
 from .tools import Tools
 
-
 _KNOWN_TRANSPORTS = ("stdio", "http", "streamable-http")
+_LOGGER = logging.getLogger(__name__)
 
 
-def _parse_args() -> tuple[Optional[str], str, str, int]:
-    """Parse CLI arguments: (config_path, transport, host, port)."""
+class RemoteInitializationError(RuntimeError):
+    """Remote token issuance or MCP initialize failed before selection."""
+
+
+@dataclass(frozen=True)
+class ServerOptions:
+    """Command-line startup options before config precedence is applied."""
+
+    config_path: str | None
+    transport: str
+    host: str
+    port: int
+    mode: str | None
+    remote_url: str | None
+    profile: str | None
+
+
+def _parse_server_options() -> ServerOptions:
+    """Parse all process-level CLI options."""
+
     parser = argparse.ArgumentParser(
         prog="alibabacloud-maxcompute-mcp-server",
         description="MaxCompute Catalog MCP server",
@@ -36,11 +66,52 @@ def _parse_args() -> tuple[Optional[str], str, str, int]:
     )
     parser.add_argument("--host", default="127.0.0.1", help="HTTP server host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="HTTP server port (default: 8000)")
+    parser.add_argument(
+        "--mode",
+        choices=(
+            RuntimeMode.DEFAULT.value,
+            RuntimeMode.REMOTE.value,
+            RuntimeMode.LOCAL.value,
+        ),
+        default=None,
+        help=(
+            "Runtime mode; default prefers authenticated remote MCP "
+            "then falls back locally"
+        ),
+    )
+    parser.add_argument(
+        "--remote-url",
+        default=None,
+        help="Remote MCP Streamable HTTP URL used in remote mode",
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Named MaxCompute config selected at startup",
+    )
     args, _ = parser.parse_known_args()
-    return args.config, args.transport, args.host, args.port
+    return ServerOptions(
+        config_path=args.config,
+        transport=args.transport,
+        host=args.host,
+        port=args.port,
+        mode=args.mode,
+        remote_url=args.remote_url,
+        profile=args.profile,
+    )
 
 
-def build_tools(config_path: Optional[str] = None) -> Tools:
+def _parse_args() -> tuple[str | None, str, str, int]:
+    """Parse the legacy transport tuple used by existing callers and tests."""
+
+    options = _parse_server_options()
+    return options.config_path, options.transport, options.host, options.port
+
+
+def build_tools(
+    config_path: str | None = None,
+    profile: str | None = None,
+) -> Tools:
     """Build a Tools instance from one-or-many named configs.
 
     Loads all named configs (load_configs), builds the client set for the
@@ -52,6 +123,11 @@ def build_tools(config_path: Optional[str] = None) -> Tools:
         configs, default_name = load_configs(config_path)
     except ValueError as e:
         sys.exit(f"Invalid MaxCompute config: {e}")
+
+    if profile:
+        if profile not in configs:
+            sys.exit(f"Unknown MaxCompute profile: {profile!r}")
+        default_name = profile
 
     try:
         cs = build_client_set(configs[default_name])
@@ -69,7 +145,7 @@ def build_tools(config_path: Optional[str] = None) -> Tools:
     except RuntimeError as e:
         # endpoint resolution / Catalog SDK initialization failure
         sys.exit(f"Failed to initialize config {default_name!r}: {e}")
-    except Exception as e:  # network/import/other — fail with a clear message, not a raw traceback
+    except Exception as e:  # noqa: BLE001 -- startup must normalize SDK failures.
         sys.exit(f"Failed to initialize config {default_name!r}: {type(e).__name__}: {e}")
 
     return Tools(
@@ -83,38 +159,85 @@ def build_tools(config_path: Optional[str] = None) -> Tools:
     )
 
 
+def build_remote_token_provider(
+    config_path: str | None,
+    profile: str,
+) -> CatalogAccessTokenProvider:
+    """Build only the credential and Catalog clients needed by remote mode."""
+
+    try:
+        configs, default_name = load_configs(config_path)
+        selected_name = profile or default_name
+        if selected_name not in configs:
+            raise ValueError(f"unknown MaxCompute profile: {selected_name!r}")
+        client_set = build_client_set(configs[selected_name])
+    except ValueError:
+        raise RuntimeError(
+            "Failed to initialize credentials for remote MCP token issuance. "
+            "Check the selected MaxCompute profile and Alibaba Cloud credential provider."
+        ) from None
+    except Exception:  # noqa: BLE001 -- credential SDK exceptions are not stable.
+        raise RuntimeError(
+            "Failed to initialize the CatalogAPI client for remote MCP token issuance."
+        ) from None
+    return CatalogAccessTokenProvider(
+        client=CatalogMCPAccessTokenClient(client_set.sdk.client),
+    )
+
+
 def _build_mcp_server(tools: Tools) -> McpServer:
     """Build an mcp.server.Server wired to the given Tools instance."""
     from mcp import types as mcp_types
-    from mcp.server import Server as McpServer
 
-    server = McpServer("maxcompute-catalog-server-python")
+    async def list_tools(
+        _context,
+        _params,
+    ) -> mcp_types.ListToolsResult:
+        return mcp_types.ListToolsResult(
+            tools=[
+                mcp_types.Tool(
+                    name=spec.name,
+                    description=spec.description,
+                    inputSchema=spec.input_schema,
+                )
+                for spec in tools.specs()
+            ]
+        )
 
-    @server.list_tools()
-    async def list_tools() -> list[mcp_types.Tool]:
-        return [
-            mcp_types.Tool(
-                name=s.name,
-                description=s.description,
-                inputSchema=s.input_schema,
-            )
-            for s in tools.specs()
-        ]
-
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[mcp_types.Content]:
+    async def call_tool(
+        _context,
+        params: mcp_types.CallToolRequestParams,
+    ) -> mcp_types.CallToolResult:
         try:
-            result = tools.call(name, arguments or {})
+            result = tools.call(params.name, params.arguments or {})
             content = result.get("content", [])
-            return [
+            typed_content = [
                 mcp_types.TextContent(type="text", text=c["text"])
                 for c in content
                 if c.get("type") == "text"
             ]
-        except JsonRpcError as e:
-            raise ValueError(f"{e.message}: {e.data}") from e
+            return mcp_types.CallToolResult(
+                content=typed_content,
+                structuredContent=result.get("structuredContent"),
+                isError=bool(result.get("isError", False)),
+            )
+        except JsonRpcError as error:
+            return mcp_types.CallToolResult(
+                content=[
+                    mcp_types.TextContent(
+                        type="text",
+                        text=f"{error.message}: {error.data}",
+                    )
+                ],
+                structuredContent=None,
+                isError=True,
+            )
 
-    return server
+    return McpServer(
+        "maxcompute-catalog-server-python",
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+    )
 
 
 async def _run_stdio(tools: Tools) -> None:
@@ -129,6 +252,85 @@ async def _run_stdio(tools: Tools) -> None:
         )
 
 
+async def _run_remote_proxy(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+) -> None:
+    """Run the transparent stdio-to-remote-MCP adapter."""
+
+    from .remote_proxy import run_remote_proxy
+
+    await run_remote_proxy(config, token_provider)
+
+
+async def _probe_remote_mcp(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+) -> None:
+    """Verify Catalog token issuance and an authenticated MCP initialize."""
+
+    from .remote_proxy import probe_remote_mcp
+
+    await probe_remote_mcp(config, token_provider)
+
+
+async def _initialize_remote_mcp(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+) -> None:
+    """Issue a Catalog token and authenticate one regional MCP endpoint."""
+
+    try:
+        await token_provider.get_access_token()
+    except Exception:  # noqa: BLE001 -- normalize SDK and transport failures.
+        raise RemoteInitializationError(
+            "Remote MCP token issuance failed during initialization"
+        ) from None
+    try:
+        await _probe_remote_mcp(config, token_provider)
+    except Exception:  # noqa: BLE001 -- normalize remote transport failures.
+        raise RemoteInitializationError(
+            "Remote MCP initialization failed"
+        ) from None
+
+
+async def _run_forced_remote_stdio(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+) -> None:
+    """Initialize and run remote mode without a local fallback."""
+
+    await _initialize_remote_mcp(config, token_provider)
+    await _run_remote_proxy(config, token_provider)
+
+
+async def _run_default_stdio(
+    runtime_config: RuntimeConfig,
+    config_path: str | None,
+) -> None:
+    """Initialize remote once at startup, otherwise start original local stdio."""
+
+    remote = runtime_config.remote
+    if remote is not None:
+        try:
+            token_provider = build_remote_token_provider(
+                config_path,
+                runtime_config.profile,
+            )
+            await _initialize_remote_mcp(remote, token_provider)
+        except Exception as error:  # noqa: BLE001 -- default mode must fall back.
+            _LOGGER.warning(
+                "Remote MCP initialization failed; falling back to local mode (%s)",
+                type(error).__name__,
+            )
+        else:
+            await _run_remote_proxy(remote, token_provider)
+            return
+
+    tools = build_tools(config_path, profile=runtime_config.profile)
+    await _run_stdio(tools)
+
+
 def _run_http(tools: Tools, host: str, port: int) -> None:
     """Start a Streamable HTTP server on host:port.
 
@@ -136,26 +338,12 @@ def _run_http(tools: Tools, host: str, port: int) -> None:
       /mcp  — Streamable HTTP (GET/POST/DELETE)
     """
     import uvicorn
-    from starlette.applications import Starlette
-    from starlette.routing import Mount, Route
-
-    from mcp.server.fastmcp.server import StreamableHTTPASGIApp
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     mcp_server = _build_mcp_server(tools)
-    session_manager = StreamableHTTPSessionManager(
-        app=mcp_server,
-        stateless=True,
-    )
-    asgi_app = StreamableHTTPASGIApp(session_manager)
-
-    app = Starlette(
-        routes=[
-            Mount("/mcp", routes=[
-                Route("/", endpoint=asgi_app, methods=["GET", "POST", "DELETE"]),
-            ]),
-        ],
-        lifespan=lambda _app: session_manager.run(),
+    app = mcp_server.streamable_http_app(
+        streamable_http_path="/mcp",
+        stateless_http=True,
+        host=host,
     )
     uvicorn.run(app, host=host, port=port)
 
@@ -179,10 +367,51 @@ def main() -> None:
         stream=sys.stderr,
         format="%(levelname)s: %(name)s: %(message)s",
     )
-    config_path, transport, host, port = _parse_args()
-    tools = build_tools(config_path)
+    options = _parse_server_options()
+    try:
+        runtime_config = load_runtime_config(
+            options.config_path,
+            mode=options.mode,
+            remote_url=options.remote_url,
+            profile=options.profile,
+            allow_remote=options.transport == "stdio",
+        )
+    except ValueError as error:
+        sys.exit(f"Invalid MCP runtime config: {error}")
 
-    if transport in ("http", "streamable-http"):
-        _run_http(tools, host=host, port=port)
+    if runtime_config.mode is RuntimeMode.REMOTE:
+        if options.transport != "stdio":
+            sys.exit("Remote MCP proxy mode supports only stdio transport")
+        if runtime_config.remote is None:
+            sys.exit("Remote MCP proxy configuration is missing")
+        try:
+            token_provider = build_remote_token_provider(
+                options.config_path,
+                runtime_config.profile,
+            )
+        except RuntimeError:
+            sys.exit("Remote MCP token provider initialization failed")
+        try:
+            asyncio.run(
+                _run_forced_remote_stdio(
+                    runtime_config.remote,
+                    token_provider,
+                )
+            )
+        except RemoteInitializationError as error:
+            sys.exit(str(error))
+        return
+
+    if (
+        runtime_config.mode is RuntimeMode.DEFAULT
+        and runtime_config.remote is not None
+    ):
+        asyncio.run(_run_default_stdio(runtime_config, options.config_path))
+        return
+
+    tools = build_tools(options.config_path, profile=runtime_config.profile)
+
+    if options.transport in ("http", "streamable-http"):
+        _run_http(tools, host=options.host, port=options.port)
     else:
         asyncio.run(_run_stdio(tools))

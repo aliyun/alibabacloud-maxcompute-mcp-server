@@ -29,15 +29,16 @@ classifiers = [
   "Topic :: Database",
 ]
 dependencies = [
-  "pyodps_catalog>=0.3.0,<0.4",
-  "alibabacloud-tea>=0.3.0",  # Alibaba Cloud official Tea framework (not the third-party tea package)
-  "alibabacloud_tea_util>=0.3.0",
-  "alibabacloud-credentials>=1.0.0",  # Alibaba Cloud credentials SDK, supports default credential chain and ALIBABA_CLOUD_CREDENTIALS_URI (aligned with dataworks-mcp-server)
-  "maxcompute_tea_openapi",
-  "maxcompute_tea_util",
-  "pyodps>=0.12.5.1",  # MaxCompute compute engine: execute SQL, partitions, instances, etc.
-  "mcp>=1.0.0",        # Official MCP Python SDK (stdio + Streamable HTTP transport)
-  "uvicorn>=0.20.0",   # ASGI server for Streamable HTTP mode
+  "pyodps_catalog>=0.4.0,<0.5",
+  "alibabacloud-tea>=0.4.3",  # Alibaba Cloud official Tea framework (not the third-party tea package)
+  "alibabacloud_tea_util>=0.3.15",
+  "alibabacloud-credentials>=1.0.12",  # Alibaba Cloud credentials SDK, supports default credential chain and ALIBABA_CLOUD_CREDENTIALS_URI (aligned with dataworks-mcp-server)
+  "maxcompute_tea_openapi>=1.3.1",
+  "maxcompute_tea_util>=0.0.1",
+  "pyodps>=0.13.1",    # MaxCompute compute engine: execute SQL, partitions, instances, etc.
+  "mcp>=2.0.0,<3",     # Official MCP Python SDK with 2026-07-28 support
+  "httpx2>=2.12.0,<3", # MCP 2.x Streamable HTTP client dependency
+  "uvicorn>=0.52.4",   # ASGI server for Streamable HTTP mode
 ]
 
 [project.urls]
@@ -46,18 +47,18 @@ Repository = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server"
 Documentation = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server#readme"
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4.0"]
+dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0"]
 # E2E credential proxy: local service uses AK to call STS AssumeRole, provides ALIBABA_CLOUD_CREDENTIALS_URI externally
-sts-proxy = ["alibabacloud-sts20150401>=1.1.0"]
+sts-proxy = ["alibabacloud-sts20150401>=1.2.0"]
 
 [project.scripts]
 alibabacloud-maxcompute-mcp-server = "maxcompute_catalog_mcp.server:main"
 
 [dependency-groups]
 dev = [
-  "pytest>=7",
-  "pytest-cov>=4.0",
-  "anthropic>=0.87.0",
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
+  "anthropic>=0.122.0",
 ]
 
 # Default to Alibaba Cloud PyPI mirror; set UV_DEFAULT_INDEX=https://pypi.org/simple/ to use official PyPI

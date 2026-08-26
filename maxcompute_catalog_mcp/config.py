@@ -19,8 +19,11 @@ Configuration methods (recommended for MCP):
      ALIBABA_CLOUD_CREDENTIALS_URI       - one option in the default credential chain; used when AK/SK is not set
      MAXCOMPUTE_DEFAULT_PROJECT          - default project name
      MAXCOMPUTE_NAMESPACE_ID             - optional; main account UID for Catalog search (namespaces/:search)
+     MAXCOMPUTE_REGION                   - Region for endpoint synthesis or validation
+     MAXCOMPUTE_NETWORK                  - "public" | "vpc" for endpoint synthesis or validation
    - Credentials: AK/SK from config/env takes priority; otherwise Alibaba Cloud default credential chain is used.
-   - catalogapi_endpoint: auto-resolved via the existing ODPS client in build_tools() if not explicitly set.
+   - catalogapi_endpoint: synthesized by simple region/network config; otherwise
+     auto-resolved via the existing ODPS client in build_tools() if not set.
    - protocol: explicit override of transport scheme for both planes. When empty,
      scheme is inferred per-client from the embedded scheme of each endpoint
      (catalogapi falls back to maxcompute scheme), defaulting to "https".
@@ -28,15 +31,16 @@ Configuration methods (recommended for MCP):
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from .tools_common import _env
 
-
 _ALLOWED_PROTOCOLS = ("", "http", "https")
+_ALLOWED_NETWORKS = ("", "public", "vpc")
+_REGION_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
 @dataclass(frozen=True)
@@ -45,13 +49,14 @@ class MaxComputeCatalogConfig:
 
     catalogapi_endpoint: str
     maxcompute_endpoint: str
-    access_key_id: str
-    access_key_secret: str
-    security_token: str = ""  # STS temporary token; empty for non-STS auth
+    access_key_id: str = field(repr=False)
+    access_key_secret: str = field(repr=False)
+    security_token: str = field(default="", repr=False)  # STS token; empty for non-STS auth
     default_project: str = ""
     namespace_id: str = ""  # main account UID for Catalog API namespaces/:search
     protocol: str = ""  # "" | "http" | "https"; empty means infer per-client
-    region: str = ""  # display-only label for named configs (e.g. cn-hangzhou); not used for connection
+    region: str = ""  # Region for simple config or endpoint validation
+    network: str = ""  # "" | "public" | "vpc"; simple-config network
     description: str = ""  # display-only human note for named configs; not used for connection
 
 
@@ -63,6 +68,40 @@ class ResolvedEndpoints:
     maxcompute_url: str        # full URL including scheme
     catalogapi_protocol: str   # "http" | "https"
     catalogapi_host: str       # bare host (no scheme)
+
+
+def _resolve_simple_endpoints(
+    maxcompute_endpoint: str,
+    catalogapi_endpoint: str,
+    region: str,
+    network: str,
+) -> tuple[str, str]:
+    """Synthesize standard FE and Catalog endpoints from region + network."""
+
+    if network not in _ALLOWED_NETWORKS:
+        raise ValueError(
+            f"invalid network value {network!r}; allowed: {{'', 'public', 'vpc'}}"
+        )
+    if network and not region:
+        raise ValueError("region is required when network is configured")
+    if network and _REGION_PATTERN.fullmatch(region) is None:
+        raise ValueError("region is invalid for endpoint synthesis")
+    if region and network:
+        if network == "public":
+            maxcompute_endpoint = maxcompute_endpoint or (
+                f"https://service.{region}.maxcompute.aliyun.com/api"
+            )
+            catalogapi_endpoint = catalogapi_endpoint or (
+                f"https://catalogapi.{region}.maxcompute.aliyun.com"
+            )
+        else:
+            maxcompute_endpoint = maxcompute_endpoint or (
+                f"https://service.{region}-intranet.maxcompute.aliyun-inc.com/api"
+            )
+            catalogapi_endpoint = catalogapi_endpoint or (
+                f"https://catalogapi.{region}-intranet.maxcompute.aliyun-inc.com"
+            )
+    return maxcompute_endpoint, catalogapi_endpoint
 
 
 def split_scheme(endpoint: str) -> Tuple[Optional[str], str]:
@@ -145,8 +184,9 @@ def resolve_catalogapi_endpoint_with_client(
 def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
     """Load config from file and environment variables.
 
-    Does not auto-resolve catalogapi_endpoint; if unset, it is resolved in build_tools()
-    after the ODPS client is created.
+    Does not discover catalogapi_endpoint over the network; if simple config
+    cannot synthesize it, discovery happens in build_tools() after the ODPS
+    client is created.
     """
     path = Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
     conn: Dict[str, Any] = {}
@@ -173,6 +213,14 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
     )
     default_project = pick("defaultProject", "default_project", from_env="MAXCOMPUTE_DEFAULT_PROJECT")
     namespace_id = pick("namespaceId", "namespace_id", "account_uid", from_env="MAXCOMPUTE_NAMESPACE_ID")
+    region = pick("region", from_env="MAXCOMPUTE_REGION")
+    network = pick("network", from_env="MAXCOMPUTE_NETWORK").lower()
+    maxcompute_endpoint, catalogapi_endpoint = _resolve_simple_endpoints(
+        maxcompute_endpoint,
+        catalogapi_endpoint,
+        region,
+        network,
+    )
     protocol_raw = pick("protocol", from_env="MAXCOMPUTE_PROTOCOL")
     protocol = protocol_raw.lower()
     if protocol not in _ALLOWED_PROTOCOLS:
@@ -207,6 +255,8 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
         default_project=default_project,
         namespace_id=namespace_id,
         protocol=protocol,
+        region=region,
+        network=network,
     )
 
 
@@ -214,7 +264,7 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
     """Parse one named-config bundle (dict-only, NO environment overrides).
 
     Used by load_configs() for each entry under the top-level "configs" object.
-    Field-name variants mirror load_config(). region/description are display-only.
+    Field-name variants mirror load_config(). description remains display-only.
     """
     def pick(*keys: str) -> str:
         for k in keys:
@@ -223,7 +273,16 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
                 return v.strip() if isinstance(v, str) else str(v)
         return ""
 
+    catalogapi_endpoint = pick("catalogapi_endpoint", "catalogapiEndpoint", "endpoint")
     maxcompute_endpoint = pick("maxcompute_endpoint", "maxcomputeEndpoint", "sdkEndpoint")
+    region = pick("region")
+    network = pick("network").lower()
+    maxcompute_endpoint, catalogapi_endpoint = _resolve_simple_endpoints(
+        maxcompute_endpoint,
+        catalogapi_endpoint,
+        region,
+        network,
+    )
     if not maxcompute_endpoint:
         raise ValueError("missing required 'maxcompute_endpoint'")
     protocol = pick("protocol").lower()
@@ -231,7 +290,7 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
         raise ValueError(f"invalid protocol value {protocol!r}; allowed: {{'', 'http', 'https'}}")
 
     return MaxComputeCatalogConfig(
-        catalogapi_endpoint=pick("catalogapi_endpoint", "catalogapiEndpoint", "endpoint"),
+        catalogapi_endpoint=catalogapi_endpoint,
         maxcompute_endpoint=maxcompute_endpoint,
         access_key_id=pick("accessKeyId", "access_key_id"),
         access_key_secret=pick("accessKeySecret", "access_key_secret"),
@@ -239,7 +298,8 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
         default_project=pick("defaultProject", "default_project"),
         namespace_id=pick("namespaceId", "namespace_id", "account_uid"),
         protocol=protocol,
-        region=pick("region"),
+        region=region,
+        network=network,
         description=pick("description", "desc"),
     )
 
