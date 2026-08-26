@@ -3,7 +3,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/downloads/)
 
-[中文文档](README_ZH.md)
+[中文文档](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/README_ZH.md)
 
 A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launcher for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It can run the original SDK-backed server (`local` mode) or act as a transparent stdio proxy to the hosted MaxCompute MCP service (`remote` mode).
 
@@ -92,15 +92,30 @@ The launcher needs:
 
 ### Installation
 
-This first public release is distributed as a source repository only. PyPI and standalone tarballs are not available in this phase.
+Install the released package from PyPI with either `pip` or `uv`:
+
+```bash
+python -m pip install alibabacloud-maxcompute-mcp-server
+# or install the command in an isolated environment
+uv tool install alibabacloud-maxcompute-mcp-server
+```
+
+Verify the installed entry point:
+
+```bash
+alibabacloud-maxcompute-mcp-server --help
+```
+
+For source development, clone the repository and synchronize all development
+dependencies:
 
 ```bash
 git clone https://github.com/aliyun/alibabacloud-maxcompute-mcp-server.git
 cd alibabacloud-maxcompute-mcp-server
-uv sync
+uv sync --all-extras
 ```
 
-Verify the entry point:
+Run the development entry point:
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --help
@@ -454,11 +469,14 @@ The import module name predates the public package name and is kept for backward
 
 ## Contributing
 
-- This is the first public source release. PyPI packages and GitHub Release artifacts are **not** available in this phase.
+- A release tag publishes the PyPI package through Trusted Publishing and then
+  creates the corresponding GitHub Release; maintainers can follow the
+  [publishing runbook](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/docs/publishing.md).
 - Pull requests and issues are welcome. For Remote MCP service feedback, use
   the Remote MCP issue template. For local server code changes, please open an
   issue before starting large changes.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See the
+[LICENSE](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/LICENSE).

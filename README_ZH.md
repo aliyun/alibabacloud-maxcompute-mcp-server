@@ -3,7 +3,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/downloads/)
 
-[English](README.md)
+[English](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/README.md)
 
 阿里云 [MaxCompute](https://www.aliyun.com/product/odps) 的本地 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 启动器。它既可以用 `local` 模式运行原有 SDK 实现，也可以用 `remote` 模式作为托管版 MaxCompute MCP 服务的透明 stdio 代理。
 
@@ -82,15 +82,29 @@ Gateway 传输失败都会终止远端流程。`default` 只在选型前 fallbac
 
 ### 安装
 
-首个开源版本仅以源码仓形式发布。本阶段不提供 PyPI 与 standalone 独立发行版。
+可以使用 `pip` 或 `uv` 从 PyPI 安装发布版：
+
+```bash
+python -m pip install alibabacloud-maxcompute-mcp-server
+# 或安装到独立环境
+uv tool install alibabacloud-maxcompute-mcp-server
+```
+
+验证安装后的命令行入口：
+
+```bash
+alibabacloud-maxcompute-mcp-server --help
+```
+
+如果需要从源码开发，克隆仓库并同步全部开发依赖：
 
 ```bash
 git clone https://github.com/aliyun/alibabacloud-maxcompute-mcp-server.git
 cd alibabacloud-maxcompute-mcp-server
-uv sync
+uv sync --all-extras
 ```
 
-验证入口脚本：
+运行开发环境中的入口脚本：
 
 ```bash
 uv run alibabacloud-maxcompute-mcp-server --help
@@ -428,10 +442,14 @@ uv build
 
 ## 参与贡献
 
-- 这是首个开源源码版本。本阶段**不**提供 PyPI 包和 GitHub Release 构件
+- PyPI 包会通过 release tag 和 Trusted Publishing 发布，成功后自动创建
+  GitHub Release；维护者请按
+  [发布手册](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/docs/publishing.md)
+  操作
 - 欢迎提交 Pull Request 和 Issue。Remote MCP 服务反馈请使用 Remote MCP issue 模板；
   local server 代码较大改动请先开 Issue 讨论
 
 ## 开源协议
 
-Apache License 2.0。详见 [LICENSE](LICENSE)。
+Apache License 2.0。详见
+[LICENSE](https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/LICENSE)。

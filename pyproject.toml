@@ -1,9 +1,10 @@
 [project]
 name = "alibabacloud-maxcompute-mcp-server"
-version = "0.1.1"
+version = "0.1.4"
 description = "MCP (Model Context Protocol) server for Alibaba Cloud MaxCompute — list projects/schemas/tables, search metadata, execute SQL, and manage instances via Catalog API and PyODPS."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
   { name = "Alibaba Cloud MaxCompute MCP Server Contributors" }
@@ -20,7 +21,6 @@ keywords = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -36,15 +36,25 @@ dependencies = [
   "maxcompute_tea_openapi>=1.3.1",
   "maxcompute_tea_util>=0.0.1",
   "pyodps>=0.13.1",    # MaxCompute compute engine: execute SQL, partitions, instances, etc.
+  "pyarrow>=14,<21",    # Preserve glibc 2.17 compatibility for PyPI and uv tool installs.
   "mcp>=2.0.0,<3",     # Official MCP Python SDK with 2026-07-28 support
   "httpx2>=2.12.0,<3", # MCP 2.x Streamable HTTP client dependency
   "uvicorn>=0.52.4",   # ASGI server for Streamable HTTP mode
+  # Security floors for runtime transitive dependencies. These must be public
+  # Requires-Dist entries because PyPI installers do not read [tool.uv].
+  "cryptography>=46.0.6",
+  "requests>=2.33.0",
+  "idna>=3.15",
+  "urllib3>=2.7.0",
+  "aiohttp>=3.14.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server"
 Repository = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server"
 Documentation = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server#readme"
+Issues = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/issues"
+Changelog = "https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest>=9.1.1", "pytest-cov>=7.1.0"]
@@ -68,25 +78,14 @@ dev = [
 # build requires GCC >= 9.3.  Pin to <21 to ensure a manylinux_2_17 wheel.
 # Remove this constraint when the minimum supported platform provides glibc 2.28+.
 #
-# Security floor constraints (Dependabot alerts — transitive deps not in project.dependencies):
-#   cryptography: CVE-2026-26007 (High, SECT subgroup attack) + CVE-2026-34073 (Low, DNS name constraint)
-#   requests: CVE-2026-25645 (Medium, predictable temp file in extract_zipped_paths)
+# Development-only security floor:
 #   pygments: CVE-2026-4539 (Low, ReDoS in GUID regex)
-#   idna: CVE-2026-45409 (Medium, IDNA validation bypass)
-#   urllib3: CVE-2026-44431 + CVE-2026-44432 (High, redirect header leak + streaming decompression bomb bypass)
-#   aiohttp: CVE-2026-34993 + CVE-2026-47265 (Medium, CookieJar.load unsafe deserialization + cross-origin cookie redirect leak)
 constraint-dependencies = [
-  "pyarrow>=14,<21",
-  "cryptography>=46.0.6",
-  "requests>=2.33.0",
   "pygments>=2.20.0",
-  "idna>=3.15",
-  "urllib3>=2.7.0",
-  "aiohttp>=3.14.0",
 ]
 
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
