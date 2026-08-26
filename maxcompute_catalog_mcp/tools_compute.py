@@ -3,6 +3,7 @@
 Provides ComputeMixin with handlers for SQL cost estimation, execution,
 and instance status/result retrieval.
 """
+
 from __future__ import annotations
 
 import errno
@@ -11,14 +12,14 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, NamedTuple
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 try:
     from odps.errors import WaitTimeoutError as _OdpsWaitTimeoutError
 except ImportError:
-    _OdpsWaitTimeoutError = None  # type: ignore[assignment,misc]
+    _OdpsWaitTimeoutError = None
     logging.getLogger(__name__).warning(
         "odps.errors.WaitTimeoutError not available; SQL timeout detection disabled"
     )
@@ -33,6 +34,9 @@ from .tools_common import (
     parse_timeout,
     require_arg,
 )
+
+if TYPE_CHECKING:
+    from .maxcompute_client import MaxComputeClient
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +55,14 @@ _PREVIEW_ROWS = 20
 
 
 class _ReadResult(NamedTuple):
-    rows: List[Dict[str, Any]]
+    rows: list[dict[str, Any]]
     total: int
     truncated: bool
-    bytes_written: Optional[int]
+    bytes_written: int | None
 
 
-def _serialize_record(record: Any, cols: List[str]) -> Dict[str, Any]:
-    row: Dict[str, Any] = {}
+def _serialize_record(record: Any, cols: list[str]) -> dict[str, Any]:
+    row: dict[str, Any] = {}
     for col in cols:
         val = record[col]
         row[col] = val if isinstance(val, (int, float, bool, type(None))) else str(val)
@@ -113,11 +117,15 @@ _DENIED_PREFIXES_POSIX = (
 
 _DENIED_PREFIXES_WINDOWS = _build_windows_denied_prefixes() if os.name == "nt" else ()
 
-_DENIED_PREFIXES = _DENIED_PREFIXES_WINDOWS if os.name == "nt" else _DENIED_PREFIXES_POSIX
+_DENIED_PREFIXES = (
+    _DENIED_PREFIXES_WINDOWS if os.name == "nt" else _DENIED_PREFIXES_POSIX
+)
 
 # Pre-computed lowercase Windows prefixes for case-insensitive comparison.
 # Must be patched alongside _DENIED_PREFIXES in tests (they are derived at import time).
-_DENIED_PREFIXES_WIN_LC = tuple(str(p).lower() for p in _DENIED_PREFIXES) if os.name == "nt" else ()
+_DENIED_PREFIXES_WIN_LC = (
+    tuple(str(p).lower() for p in _DENIED_PREFIXES) if os.name == "nt" else ()
+)
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
 _UNC_PREFIX_RE = re.compile(r"^[\\/]{2,}[^\\/]")
@@ -216,7 +224,7 @@ def _resolve_output_uri(uri: str, *, create_dir: bool = True) -> Path:
 
 
 def _decorate_output_path(
-    base: Path, instance_id: str, task_name: Optional[str] = None
+    base: Path, instance_id: str, task_name: str | None = None
 ) -> Path:
     """Insert instanceId (and optional task_name) into the filename stem.
 
@@ -232,9 +240,9 @@ def _decorate_output_path(
 
 def _read_rows(
     reader: Any,
-    cols: List[str],
+    cols: list[str],
     *,
-    output_path: Optional[Path],
+    output_path: Path | None,
 ) -> _ReadResult:
     """Consume *reader* once.
 
@@ -250,7 +258,7 @@ def _read_rows(
     more rows existed beyond the cap.
     """
     max_inline = _max_inline_rows()
-    rows_kept: List[Dict[str, Any]] = []
+    rows_kept: list[dict[str, Any]] = []
     total = 0
     truncated = False
 
@@ -310,13 +318,20 @@ def _read_rows(
             try:
                 tmp_path.unlink(missing_ok=True)
             except OSError as unlink_exc:
-                logger.warning("Failed to remove partial file %s: %s", tmp_path, unlink_exc)
+                logger.warning(
+                    "Failed to remove partial file %s: %s", tmp_path, unlink_exc
+                )
     # os.replace semantics: atomic on POSIX, replaces dest if it exists
     tmp_path.replace(output_path)
     return _ReadResult(rows_kept, total, truncated, bytes_written)
 
 
-def _run_dml(compute: Any, sql: str, hints: Dict[str, str], timeout_secs: int):
+def _run_dml(
+    compute: Any,
+    sql: str,
+    hints: dict[str, str],
+    timeout_secs: int,
+) -> tuple[Any, bool]:
     """Submit a DML SQL statement and wait for completion with timeout.
 
     Returns (inst, timed_out: bool). Raises on non-timeout errors.
@@ -341,12 +356,21 @@ class ComputeMixin:
     _get_compute_client_for_project().
     """
 
+    if TYPE_CHECKING:
+        maxcompute_client: MaxComputeClient | None
+        default_project: str
+
+        def _get_compute_client_for_project(
+            self, project: str
+        ) -> MaxComputeClient | None: ...
+
     @staticmethod
-    def _get_instance_logview(inst: Any) -> Optional[str]:
+    def _get_instance_logview(inst: Any) -> str | None:
         """Return instance log view URL via pyodps Instance.get_logview_address()."""
         try:
-            return inst.get_logview_address()
-        except Exception as e:
+            address = inst.get_logview_address()
+            return str(address) if address is not None else None
+        except Exception as e:  # noqa: BLE001 -- Logview is best-effort provider data.
             logger.debug("Failed to get logview address: %s", e)
             return None
 
@@ -354,8 +378,8 @@ class ComputeMixin:
         self,
         project: str,
         sql: str,
-        hints: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        hints: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         """Estimate SQL cost before execution (MaxCompute compute client only).
 
         hints: runtime parameters forwarded to pyodps execute_sql_cost. Required
@@ -380,12 +404,12 @@ class ComputeMixin:
                 complexity = getattr(cost, "complexity", 0.0) or 0.0
                 udf_num = getattr(cost, "udf_num", 0) or 0
                 return {
-                    "estimatedCU": int(complexity * (input_size / (1024 ** 3)) * 10) or 1,
+                    "estimatedCU": int(complexity * (input_size / (1024**3)) * 10) or 1,
                     "inputBytes": input_size,
                     "complexity": complexity,
                     "udfCount": udf_num,
                 }
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- cost estimation is best-effort.
                 logger.debug("SQL cost estimation failed (non-fatal): %s", e)
                 return {
                     "estimatedCU": 0,
@@ -404,19 +428,23 @@ class ComputeMixin:
             "message": "Configure MaxCompute compute engine (default_project + sdk_endpoint) to enable cost estimation.",
         }
 
-    def cost_sql(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def cost_sql(self, args: dict[str, Any]) -> dict[str, Any]:
         """Estimate SQL cost without executing the SQL."""
         project = opt_arg(args, "project", self.default_project) or self.default_project
         sql = require_arg(args, "sql", "SQL statement cannot be empty")
         extra_hints = args.get("hints")
         hints = extra_hints if isinstance(extra_hints, dict) else None
         estimate = self._estimate_sql_cost(project, sql, hints=hints)
-        result: Dict[str, Any] = {"project": project, "sql": sql[:200], "costEstimate": estimate}
+        result: dict[str, Any] = {
+            "project": project,
+            "sql": sql[:200],
+            "costEstimate": estimate,
+        }
         if len(sql) > 200:
             result["sqlTruncated"] = True
         return mcp_text_result(result)
 
-    def execute_sql(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_sql(self, args: dict[str, Any]) -> dict[str, Any]:
         project = opt_arg(args, "project", self.default_project) or self.default_project
         sql = require_arg(args, "sql", "SQL statement cannot be empty")
         max_cu = args.get("maxCU")
@@ -433,30 +461,36 @@ class ComputeMixin:
             estimated_cu = estimate.get("estimatedCU") or 0
             if estimated_cu > max_cu:
                 suggested = max(estimated_cu, int(estimated_cu * 1.2))
-                return mcp_text_result({
-                    "success": False,
-                    "overLimit": True,
-                    "message": "Estimated resource usage exceeds the limit; increase maxCU and retry.",
-                    "estimatedCU": estimated_cu,
-                    "maxCU": max_cu,
-                    "suggestedMaxCU": suggested,
-                    "costEstimate": estimate,
-                })
+                return mcp_text_result(
+                    {
+                        "success": False,
+                        "overLimit": True,
+                        "message": "Estimated resource usage exceeds the limit; increase maxCU and retry.",
+                        "estimatedCU": estimated_cu,
+                        "maxCU": max_cu,
+                        "suggestedMaxCU": suggested,
+                        "costEstimate": estimate,
+                    }
+                )
 
         if self.maxcompute_client:
             is_safe, err_msg = _is_read_only_sql(sql)
             if not is_safe:
-                return mcp_text_result({
-                    "success": False,
-                    "error": err_msg or "Only SELECT queries are allowed.",
-                })
+                return mcp_text_result(
+                    {
+                        "success": False,
+                        "error": err_msg or "Only SELECT queries are allowed.",
+                    }
+                )
             try:
                 compute = self._get_compute_client_for_project(project)
                 if compute is None:
-                    return mcp_text_result({
-                        "success": False,
-                        "error": "Failed to create compute client; check configuration.",
-                    })
+                    return mcp_text_result(
+                        {
+                            "success": False,
+                            "error": "Failed to create compute client; check configuration.",
+                        }
+                    )
                 hints = {"odps.sql.submit.mode": "script"}
                 extra_hints = args.get("hints")
                 if isinstance(extra_hints, dict):
@@ -476,12 +510,13 @@ class ComputeMixin:
                 # Async mode does format/scheme validation only — the file is written by a
                 # later get_instance call, so mkdir here would be an unnecessary side effect
                 # (and contradict the ToolSpec note that output_uri only takes effect in sync mode).
-                output_path: Optional[Path] = None
+                output_path: Path | None = None
                 output_uri_raw = args.get("output_uri")
                 if output_uri_raw:
                     try:
                         output_path = _resolve_output_uri(
-                            str(output_uri_raw), create_dir=not async_mode,
+                            str(output_uri_raw),
+                            create_dir=not async_mode,
                         )
                     except ValueError as e:
                         return mcp_text_result({"success": False, "error": str(e)})
@@ -498,7 +533,7 @@ class ComputeMixin:
 
                 # Async mode (default): return instanceId immediately without waiting
                 if async_mode:
-                    resp: Dict[str, Any] = {
+                    resp: dict[str, Any] = {
                         "success": True,
                         "instanceId": inst.id,
                         "project": project,
@@ -522,8 +557,12 @@ class ComputeMixin:
                     # Same fallback pattern as _run_dml: re-raise non-timeout errors
                     # unconditionally; timeout errors are only caught when the SDK
                     # exposes WaitTimeoutError.
-                    if _OdpsWaitTimeoutError is not None and isinstance(timeout_exc, _OdpsWaitTimeoutError):
-                        return _build_timeout_response(inst, project, timeout_secs, "Query")
+                    if _OdpsWaitTimeoutError is not None and isinstance(
+                        timeout_exc, _OdpsWaitTimeoutError
+                    ):
+                        return _build_timeout_response(
+                            inst, project, timeout_secs, "Query"
+                        )
                     raise
 
                 # Try structured reader (SELECT / WITH queries). Only open_reader()
@@ -531,7 +570,7 @@ class ComputeMixin:
                 # from _read_rows must propagate so the caller sees the real error
                 # (e.g. mid-stream network failure) instead of a misleading empty result.
                 structured_committed = False
-                structured_resp: Optional[Dict[str, Any]] = None
+                structured_resp: dict[str, Any] | None = None
                 try:
                     with inst.open_reader() as reader:
                         schema = getattr(reader, "_schema", None)
@@ -544,7 +583,9 @@ class ComputeMixin:
                                 else None
                             )
                             rows, total, truncated, bytes_written = _read_rows(
-                                reader, columns, output_path=final_output_path,
+                                reader,
+                                columns,
+                                output_path=final_output_path,
                             )
                             structured_resp = {
                                 "success": True,
@@ -572,7 +613,8 @@ class ComputeMixin:
                         raise
                     logger.debug(
                         "open_reader() unavailable (non-SELECT or schema-less result); "
-                        "falling back to raw task output. Reason: %s", reader_exc,
+                        "falling back to raw task output. Reason: %s",
+                        reader_exc,
                     )
 
                 if structured_resp is not None:
@@ -581,50 +623,64 @@ class ComputeMixin:
                 # Fallback for SHOW / DESC / EXPLAIN: read raw task results
                 task_results = inst.get_task_results()
                 raw_output = "\n".join(str(v) for v in task_results.values())
-                lines = [line for line in raw_output.strip().split("\n") if line.strip()]
-                return mcp_text_result({
-                    "success": True,
-                    "instanceId": inst.id,
-                    "data": lines,
-                    "rawOutput": raw_output,
-                    "rowCount": len(lines),
-                })
+                lines = [
+                    line for line in raw_output.strip().split("\n") if line.strip()
+                ]
+                return mcp_text_result(
+                    {
+                        "success": True,
+                        "instanceId": inst.id,
+                        "data": lines,
+                        "rawOutput": raw_output,
+                        "rowCount": len(lines),
+                    }
+                )
             except Exception as e:
                 logger.exception("execute_sql failed")
                 return mcp_text_result({"success": False, "error": str(e)})
 
-        return _unsupported("SQL execution requires MaxCompute compute engine (default_project + sdk_endpoint).")
+        return _unsupported(
+            "SQL execution requires MaxCompute compute engine (default_project + sdk_endpoint)."
+        )
 
-    def get_instance_status(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def get_instance_status(self, args: dict[str, Any]) -> dict[str, Any]:
         if not self.maxcompute_client:
-            return _unsupported("Querying instance status requires MaxCompute compute engine (default_project + sdk_endpoint).")
+            return _unsupported(
+                "Querying instance status requires MaxCompute compute engine (default_project + sdk_endpoint)."
+            )
         project = opt_arg(args, "project", self.default_project) or self.default_project
         instance_id = require_arg(args, "instanceId", "instanceId cannot be empty")
         try:
-            inst = self.maxcompute_client.get_instance(instance_id, project=project or None)
+            inst = self.maxcompute_client.get_instance(
+                instance_id, project=project or None
+            )
             status = getattr(inst, "status", None)
             if status is not None and hasattr(status, "name"):
                 status = status.name
-            return mcp_text_result({
-                "instanceId": instance_id,
-                "project": project,
-                "status": str(status) if status else None,
-                "isTerminated": getattr(inst, "is_terminated", lambda: False)(),
-                "isSuccessful": getattr(inst, "is_successful", lambda: False)(),
-                "logView": self._get_instance_logview(inst),
-            })
+            return mcp_text_result(
+                {
+                    "instanceId": instance_id,
+                    "project": project,
+                    "status": str(status) if status else None,
+                    "isTerminated": getattr(inst, "is_terminated", lambda: False)(),
+                    "isSuccessful": getattr(inst, "is_successful", lambda: False)(),
+                    "logView": self._get_instance_logview(inst),
+                }
+            )
         except Exception as e:
             logger.exception("get_instance_status failed for %r", instance_id)
             return mcp_text_result({"success": False, "error": str(e)})
 
-    def get_instance(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def get_instance(self, args: dict[str, Any]) -> dict[str, Any]:
         if not self.maxcompute_client:
-            return _unsupported("Retrieving instance results requires MaxCompute compute engine (default_project + sdk_endpoint).")
+            return _unsupported(
+                "Retrieving instance results requires MaxCompute compute engine (default_project + sdk_endpoint)."
+            )
         project = opt_arg(args, "project", self.default_project) or self.default_project
         instance_id = require_arg(args, "instanceId", "instanceId cannot be empty")
 
         # Validate output_uri before touching ODPS to avoid wasted round-trips on bad input
-        output_path: Optional[Path] = None
+        output_path: Path | None = None
         output_uri_raw = args.get("output_uri")
         if output_uri_raw:
             try:
@@ -633,20 +689,30 @@ class ComputeMixin:
                 return mcp_text_result({"success": False, "error": str(e)})
 
         try:
-            inst = self.maxcompute_client.get_instance(instance_id, project=project or None)
+            inst = self.maxcompute_client.get_instance(
+                instance_id, project=project or None
+            )
             if not getattr(inst, "is_terminated", lambda: False)():
-                return mcp_text_result({
-                    "instanceId": instance_id,
-                    "message": "Instance not terminated yet; wait and retry or use get_instance_status.",
-                })
-            results = getattr(inst, "get_task_results", lambda: {})()
+                return mcp_text_result(
+                    {
+                        "instanceId": instance_id,
+                        "message": "Instance not terminated yet; wait and retry or use get_instance_status.",
+                    }
+                )
+            results: dict[str, Any] = getattr(inst, "get_task_results", dict)()
             if not results:
-                return mcp_text_result({"instanceId": instance_id, "results": {}, "message": "No task results."})
+                return mcp_text_result(
+                    {
+                        "instanceId": instance_id,
+                        "results": {},
+                        "message": "No task results.",
+                    }
+                )
 
             # Decorate filenames with instanceId (always) and task_name (only when multi-task)
             # so repeated calls never overwrite each other.
             multi_task = len(results) > 1
-            out: Dict[str, Any] = {}
+            out: dict[str, Any] = {}
             for task_name, task_result in results.items():
                 try:
                     if hasattr(task_result, "open_reader"):
@@ -659,12 +725,12 @@ class ComputeMixin:
                             if schema is None or not getattr(schema, "columns", None):
                                 out[task_name] = {
                                     "error": "Task result has no column schema; "
-                                             "cannot decode rows. This usually means the task "
-                                             "is not a SELECT/WITH query."
+                                    "cannot decode rows. This usually means the task "
+                                    "is not a SELECT/WITH query."
                                 }
                                 continue
                             cols = [c.name for c in schema.columns]
-                            task_output_path: Optional[Path] = None
+                            task_output_path: Path | None = None
                             if output_path is not None:
                                 task_output_path = _decorate_output_path(
                                     output_path,
@@ -672,9 +738,11 @@ class ComputeMixin:
                                     task_name if multi_task else None,
                                 )
                             rows, total, truncated, bytes_written = _read_rows(
-                                reader, cols, output_path=task_output_path,
+                                reader,
+                                cols,
+                                output_path=task_output_path,
                             )
-                            task_entry: Dict[str, Any] = {
+                            task_entry: dict[str, Any] = {
                                 "columns": cols,
                                 "rowCount": total,
                                 "truncated": truncated,
@@ -695,7 +763,7 @@ class ComputeMixin:
                             out[task_name] = task_entry
                     else:
                         out[task_name] = str(task_result)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 -- isolate per-task SDK failures.
                     out[task_name] = {"error": str(e)}
             return mcp_text_result({"instanceId": instance_id, "results": out})
         except Exception as e:

@@ -1,4 +1,5 @@
 """Protocol and server wiring tests."""
+
 from __future__ import annotations
 
 import json
@@ -67,7 +68,9 @@ class TestToolsSpecs:
 
 
 _project_root = Path(__file__).resolve().parent.parent
-_config_path = Path(os.environ.get("MAXCOMPUTE_CATALOG_CONFIG", _project_root / "config.json"))
+_config_path = Path(
+    os.environ.get("MAXCOMPUTE_CATALOG_CONFIG", _project_root / "config.json")
+)
 _has_config = _config_path.exists()
 _has_env = all(
     os.environ.get(k)
@@ -102,20 +105,25 @@ class TestProtocolViaSubprocess:
             env=env,
         )
         try:
-            r1 = _send(proc, {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test", "version": "1.0"},
+            r1 = _send(
+                proc,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1.0"},
+                    },
                 },
-            })
+            )
             assert "result" in r1
             assert r1["result"].get("protocolVersion") == "2024-11-05"
 
-            r2 = _send(proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+            r2 = _send(
+                proc, {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+            )
             names = [t["name"] for t in r2["result"]["tools"]]
             assert "list_projects" in names
             assert "get_project" in names

@@ -6,10 +6,11 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from mcp.server import Server as McpServer
 
-from .client_factory import build_client_set
+from .client_factory import build_catalog_client_set, build_client_set
 from .config import load_configs
 from .mcp_protocol import JsonRpcError
 from .remote_auth import (
@@ -22,7 +23,11 @@ from .runtime_config import (
     RuntimeMode,
     load_runtime_config,
 )
-from .tools import Tools
+
+if TYPE_CHECKING:
+    from mcp.server.context import ServerRequestContext
+
+    from .tools import Tools
 
 _KNOWN_TRANSPORTS = ("stdio", "http", "streamable-http")
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +35,10 @@ _LOGGER = logging.getLogger(__name__)
 
 class RemoteInitializationError(RuntimeError):
     """Remote token issuance or MCP initialize failed before selection."""
+
+
+class LocalDependenciesMissingError(RuntimeError):
+    """The optional local SDK dependency set is not installed."""
 
 
 @dataclass(frozen=True)
@@ -64,8 +73,12 @@ def _parse_server_options() -> ServerOptions:
         default="stdio",
         help="Transport mode (default: stdio)",
     )
-    parser.add_argument("--host", default="127.0.0.1", help="HTTP server host (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8000, help="HTTP server port (default: 8000)")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="HTTP server host (default: 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8000, help="HTTP server port (default: 8000)"
+    )
     parser.add_argument(
         "--mode",
         choices=(
@@ -120,8 +133,11 @@ def build_tools(
     Backward compatible: a legacy single config surfaces as one config "default".
     """
     try:
+        tools_type = _load_local_tools_type()
         configs, default_name = load_configs(config_path)
-    except ValueError as e:
+    except LocalDependenciesMissingError as error:
+        sys.exit(str(error))
+    except (TypeError, ValueError) as e:
         sys.exit(f"Invalid MaxCompute config: {e}")
 
     if profile:
@@ -146,9 +162,11 @@ def build_tools(
         # endpoint resolution / Catalog SDK initialization failure
         sys.exit(f"Failed to initialize config {default_name!r}: {e}")
     except Exception as e:  # noqa: BLE001 -- startup must normalize SDK failures.
-        sys.exit(f"Failed to initialize config {default_name!r}: {type(e).__name__}: {e}")
+        sys.exit(
+            f"Failed to initialize config {default_name!r}: {type(e).__name__}: {e}"
+        )
 
-    return Tools(
+    return tools_type(
         sdk=cs.sdk,
         default_project=cs.default_project,
         namespace_id=cs.namespace_id,
@@ -157,6 +175,22 @@ def build_tools(
         configs=configs,
         default_name=default_name,
     )
+
+
+def _load_local_tools_type() -> type[Tools]:
+    """Load the SDK-backed tool implementation only when local mode is selected."""
+
+    try:
+        from .tools import Tools as LocalTools
+    except ModuleNotFoundError as error:
+        missing = error.name or ""
+        if missing in {"odps", "pyarrow"} or missing.startswith(("odps.", "pyarrow.")):
+            raise LocalDependenciesMissingError(
+                "Local MCP mode requires optional SDK dependencies. Install them "
+                "with: pip install 'alibabacloud-maxcompute-mcp-server[local]'"
+            ) from None
+        raise
+    return LocalTools
 
 
 def build_remote_token_provider(
@@ -170,7 +204,7 @@ def build_remote_token_provider(
         selected_name = profile or default_name
         if selected_name not in configs:
             raise ValueError(f"unknown MaxCompute profile: {selected_name!r}")
-        client_set = build_client_set(configs[selected_name])
+        client_set = build_catalog_client_set(configs[selected_name])
     except ValueError:
         raise RuntimeError(
             "Failed to initialize credentials for remote MCP token issuance. "
@@ -190,36 +224,36 @@ def _build_mcp_server(tools: Tools) -> McpServer:
     from mcp import types as mcp_types
 
     async def list_tools(
-        _context,
-        _params,
+        _context: ServerRequestContext[Any],
+        _params: mcp_types.PaginatedRequestParams | None,
     ) -> mcp_types.ListToolsResult:
         return mcp_types.ListToolsResult(
             tools=[
                 mcp_types.Tool(
                     name=spec.name,
                     description=spec.description,
-                    inputSchema=spec.input_schema,
+                    input_schema=spec.input_schema,
                 )
                 for spec in tools.specs()
             ]
         )
 
     async def call_tool(
-        _context,
+        _context: ServerRequestContext[Any],
         params: mcp_types.CallToolRequestParams,
     ) -> mcp_types.CallToolResult:
         try:
             result = tools.call(params.name, params.arguments or {})
             content = result.get("content", [])
-            typed_content = [
+            typed_content: list[mcp_types.ContentBlock] = [
                 mcp_types.TextContent(type="text", text=c["text"])
                 for c in content
                 if c.get("type") == "text"
             ]
             return mcp_types.CallToolResult(
                 content=typed_content,
-                structuredContent=result.get("structuredContent"),
-                isError=bool(result.get("isError", False)),
+                structured_content=result.get("structuredContent"),
+                is_error=bool(result.get("isError", False)),
             )
         except JsonRpcError as error:
             return mcp_types.CallToolResult(
@@ -229,8 +263,8 @@ def _build_mcp_server(tools: Tools) -> McpServer:
                         text=f"{error.message}: {error.data}",
                     )
                 ],
-                structuredContent=None,
-                isError=True,
+                structured_content=None,
+                is_error=True,
             )
 
     return McpServer(
@@ -289,9 +323,7 @@ async def _initialize_remote_mcp(
     try:
         await _probe_remote_mcp(config, token_provider)
     except Exception:  # noqa: BLE001 -- normalize remote transport failures.
-        raise RemoteInitializationError(
-            "Remote MCP initialization failed"
-        ) from None
+        raise RemoteInitializationError("Remote MCP initialization failed") from None
 
 
 async def _run_forced_remote_stdio(
@@ -376,7 +408,7 @@ def main() -> None:
             profile=options.profile,
             allow_remote=options.transport == "stdio",
         )
-    except ValueError as error:
+    except (TypeError, ValueError) as error:
         sys.exit(f"Invalid MCP runtime config: {error}")
 
     if runtime_config.mode is RuntimeMode.REMOTE:
@@ -402,10 +434,7 @@ def main() -> None:
             sys.exit(str(error))
         return
 
-    if (
-        runtime_config.mode is RuntimeMode.DEFAULT
-        and runtime_config.remote is not None
-    ):
+    if runtime_config.mode is RuntimeMode.DEFAULT and runtime_config.remote is not None:
         asyncio.run(_run_default_stdio(runtime_config, options.config_path))
         return
 

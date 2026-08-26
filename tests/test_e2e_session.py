@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """E2E tests: session management tools (list_configs / get_current_config / use_config).
 
 Validates the named-config runtime switching feature.
@@ -13,6 +12,7 @@ real_configs dependency to load the dedicated session-switch test config.
 
 Requires config.multiconfig.json or MAXCOMPUTE_CATALOG_CONFIG env var pointing to a valid config file.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,6 +35,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _config_path() -> str:
     return os.environ.get("MAXCOMPUTE_CATALOG_CONFIG") or str(
         _PROJECT_ROOT / "config.multiconfig.json"
@@ -48,7 +49,7 @@ def _load_all_configs():
         return None
     try:
         return load_configs(str(path))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- live config failures are non-fatal here.
         logger.warning("config file %s exists but failed to load: %s", path, e)
         return None
 
@@ -68,18 +69,23 @@ def _assert_no_config_secrets(
     blob = json.dumps(payload)
     for name, cfg in configs.items():
         if cfg.access_key_id:
-            assert cfg.access_key_id not in blob, f"AccessKey ID leaked in {context}: {name}"
+            assert cfg.access_key_id not in blob, (
+                f"AccessKey ID leaked in {context}: {name}"
+            )
         if cfg.access_key_secret:
             assert cfg.access_key_secret not in blob, (
                 f"AccessKey Secret leaked in {context}: {name}"
             )
         if cfg.security_token:
-            assert cfg.security_token not in blob, f"STS token leaked in {context}: {name}"
+            assert cfg.security_token not in blob, (
+                f"STS token leaked in {context}: {name}"
+            )
 
 
 # ---------------------------------------------------------------------------
 # Fixtures for secret-leak assertions
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def all_configs() -> tuple[dict[str, MaxComputeCatalogConfig], str]:
@@ -107,6 +113,7 @@ def default_cfg(all_configs) -> MaxComputeCatalogConfig:
 # ---------------------------------------------------------------------------
 # 1. list_configs
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config, reason="no config file for session tests")
 class TestListConfigs:
@@ -148,6 +155,7 @@ class TestListConfigs:
 # 2. get_current_config
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config, reason="no config file for session tests")
 class TestGetCurrentConfig:
     """get_current_config: returns current active config info."""
@@ -165,12 +173,15 @@ class TestGetCurrentConfig:
     def test_get_current_config_no_secret(self, real_tools, default_cfg) -> None:
         r = real_tools.call("get_current_config", {})
         payload = _text_payload(r)
-        _assert_no_config_secrets(payload, {_DEFAULT_NAME: default_cfg}, "get_current_config")
+        _assert_no_config_secrets(
+            payload, {_DEFAULT_NAME: default_cfg}, "get_current_config"
+        )
 
 
 # ---------------------------------------------------------------------------
 # 3. use_config
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config, reason="no config file for session tests")
 class TestUseConfig:
@@ -180,7 +191,9 @@ class TestUseConfig:
         expected = _DEFAULT_NAME
         reset = real_tools.call("use_config", {"name": expected})
         reset_payload = _text_payload(reset)
-        assert reset_payload.get("success") is True, f"use_config reset failed: {reset_payload}"
+        assert reset_payload.get("success") is True, (
+            f"use_config reset failed: {reset_payload}"
+        )
 
         r = real_tools.call("use_config", {"name": expected})
         payload = _text_payload(r)
@@ -212,6 +225,7 @@ class TestUseConfig:
 # 4. Integration: session switch does not break catalog tools
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config, reason="no config file for session tests")
 class TestSessionToolsIntegration:
     """Verify catalog tools still work after a session operation."""
@@ -233,6 +247,7 @@ class TestSessionToolsIntegration:
 # 5. Cross-region switch (requires multi-config with 2+ named configs)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config, reason="no config file for session tests")
 @pytest.mark.skipif(not _has_multi, reason="multi-config required (2+ named configs)")
 class TestCrossRegionSwitch:
@@ -241,6 +256,7 @@ class TestCrossRegionSwitch:
     @pytest.fixture(autouse=True)
     def restore_default_config(self, real_tools):
         """Keep the module-scoped Tools active config isolated per test."""
+
         def switch_to_default(phase: str) -> None:
             result = real_tools.call("use_config", {"name": _DEFAULT_NAME})
             payload = _text_payload(result)
@@ -252,12 +268,12 @@ class TestCrossRegionSwitch:
         yield
         try:
             switch_to_default("after test")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- teardown must not mask test results.
             logger.warning("teardown: failed to restore default config: %s", e)
 
     def test_switch_to_second_config_succeeds(self, real_tools) -> None:
         default = _DEFAULT_NAME
-        other = [n for n in _CONFIG_NAMES if n != default][0]
+        other = next(n for n in _CONFIG_NAMES if n != default)
         r = real_tools.call("use_config", {"name": other})
         payload = _text_payload(r)
         assert payload.get("success") is True
@@ -271,10 +287,12 @@ class TestCrossRegionSwitch:
 
     def test_list_projects_after_cross_region_switch(self, real_tools) -> None:
         default = _DEFAULT_NAME
-        other = [n for n in _CONFIG_NAMES if n != default][0]
+        other = next(n for n in _CONFIG_NAMES if n != default)
         switch_result = real_tools.call("use_config", {"name": other})
         switch_payload = _text_payload(switch_result)
-        assert switch_payload.get("success") is True, f"use_config failed: {switch_payload}"
+        assert switch_payload.get("success") is True, (
+            f"use_config failed: {switch_payload}"
+        )
         assert (switch_payload.get("data") or {}).get("name") == other
 
         r = real_tools.call("list_projects", {"pageSize": 5})

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """E2E tests: SQL execution complete workflow.
 
 Covers cost_sql (basic / hints / invalid SQL), execute_sql sync mode
@@ -9,6 +8,7 @@ instance IDs.
 
 Requires config.json (or MAXCOMPUTE_CATALOG_CONFIG env var).
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,8 +19,11 @@ import pytest
 from maxcompute_catalog_mcp.tools import Tools
 from tests.conftest import (
     async_wait_instance as _wait_for_instance,
-    data as _data,
+)
+from tests.conftest import (
     has_config as _has_config,
+)
+from tests.conftest import (
     text_payload as _text_payload,
 )
 
@@ -32,6 +35,7 @@ _VALID_INSTANCE_STATUSES = {"Running", "Terminated", "Failed", "Suspended", "Can
 # ---------------------------------------------------------------------------
 # 2.1  cost_sql
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestCostSql:
@@ -48,7 +52,9 @@ class TestCostSql:
             f"cost_sql must return costEstimate, got: {payload}"
         )
         estimate = payload["costEstimate"]
-        assert isinstance(estimate, dict), f"costEstimate must be a dict, got: {estimate}"
+        assert isinstance(estimate, dict), (
+            f"costEstimate must be a dict, got: {estimate}"
+        )
         assert "estimatedCU" in estimate, (
             f"costEstimate must contain estimatedCU, got: {estimate}"
         )
@@ -58,13 +64,18 @@ class TestCostSql:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("cost_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-            "hints": {"odps.sql.allow.fullscan": "true"},
-        })
+        r = real_tools.call(
+            "cost_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+                "hints": {"odps.sql.allow.fullscan": "true"},
+            },
+        )
         payload = _text_payload(r)
-        assert "error" not in payload, f"cost_sql with hints error: {payload.get('error')}"
+        assert "error" not in payload, (
+            f"cost_sql with hints error: {payload.get('error')}"
+        )
         assert "costEstimate" in payload
 
     def test_cost_sql_fields_present(self, real_tools: Tools, real_config: Any) -> None:
@@ -72,10 +83,13 @@ class TestCostSql:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("cost_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-        })
+        r = real_tools.call(
+            "cost_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+            },
+        )
         payload = _text_payload(r)
         estimate = payload.get("costEstimate") or {}
         for field in ("estimatedCU", "inputBytes", "complexity", "udfCount"):
@@ -88,6 +102,7 @@ class TestCostSql:
 # 2.2  execute_sql — sync mode
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestExecuteSqlSync:
     """execute_sql sync mode: SELECT, WITH..SELECT, timeout, readonly guard."""
@@ -99,12 +114,15 @@ class TestExecuteSqlSync:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS n",
-            "async": False,
-            "timeout": 60,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS n",
+                "async": False,
+                "timeout": 60,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is True, f"execute_sql failed: {payload}"
         assert "columns" in payload, f"columns missing from response: {payload}"
@@ -112,17 +130,22 @@ class TestExecuteSqlSync:
             f"data/rawOutput missing from response: {payload}"
         )
 
-    def test_execute_sql_select_count(self, real_tools: Tools, real_config: Any) -> None:
+    def test_execute_sql_select_count(
+        self, real_tools: Tools, real_config: Any
+    ) -> None:
         """SELECT COUNT(*) must return a numeric result."""
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT COUNT(*) AS c FROM (SELECT 1 UNION ALL SELECT 2) t",
-            "async": False,
-            "timeout": 60,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT COUNT(*) AS c FROM (SELECT 1 UNION ALL SELECT 2) t",
+                "async": False,
+                "timeout": 60,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is True, f"SELECT COUNT(*) failed: {payload}"
         rows = payload.get("data") or []
@@ -135,18 +158,23 @@ class TestExecuteSqlSync:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "WITH tmp AS (SELECT 1 AS x, 'hello' AS y) SELECT x, y FROM tmp",
-            "async": False,
-            "timeout": 60,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "WITH tmp AS (SELECT 1 AS x, 'hello' AS y) SELECT x, y FROM tmp",
+                "async": False,
+                "timeout": 60,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is True, (
             f"WITH...SELECT must be allowed, got: {payload}"
         )
         rows = payload.get("data") or []
-        assert len(rows) >= 1, f"Expected at least 1 row from CTE SELECT, got: {payload}"
+        assert len(rows) >= 1, (
+            f"Expected at least 1 row from CTE SELECT, got: {payload}"
+        )
 
     def test_execute_sql_readonly_guard_rejects_insert(
         self, real_tools: Tools, real_config: Any
@@ -155,12 +183,15 @@ class TestExecuteSqlSync:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "INSERT INTO __nonexistent_table_xyz__ VALUES (1)",
-            "async": False,
-            "timeout": 30,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "INSERT INTO __nonexistent_table_xyz__ VALUES (1)",
+                "async": False,
+                "timeout": 30,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, (
             f"INSERT must be rejected by the read-only guard, got: {payload}"
@@ -180,12 +211,15 @@ class TestExecuteSqlSync:
             "SELECT COUNT(*) AS c "
             "FROM information_schema.tables t1, information_schema.tables t2"
         )
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": sql,
-            "async": False,
-            "timeout": 1,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": sql,
+                "async": False,
+                "timeout": 1,
+            },
+        )
         payload = _text_payload(r)
         # Either timeout occurs (instanceId returned) or query was fast enough to succeed —
         # both are valid outcomes; the important thing is no Python crash.
@@ -193,7 +227,10 @@ class TestExecuteSqlSync:
             assert "instanceId" in payload, (
                 f"Timeout response must include instanceId, got: {payload}"
             )
-            logger.info("Timeout triggered as expected; instanceId=%s", payload.get("instanceId"))
+            logger.info(
+                "Timeout triggered as expected; instanceId=%s",
+                payload.get("instanceId"),
+            )
         else:
             # Query was fast enough; verify normal success structure
             assert payload.get("success") is True or "error" in payload, (
@@ -204,6 +241,7 @@ class TestExecuteSqlSync:
 # ---------------------------------------------------------------------------
 # 2.3  Async workflow: execute_sql → get_instance_status → get_instance
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestAsyncWorkflow:
@@ -216,11 +254,14 @@ class TestAsyncWorkflow:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS x",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS x",
+                "async": True,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is True, (
             f"async execute_sql must succeed, got: {payload}"
@@ -239,11 +280,14 @@ class TestAsyncWorkflow:
             pytest.skip("default_project not configured")
 
         # Step 1: Submit async
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "WITH cte AS (SELECT 1 AS id, 'async_test' AS val) SELECT id, val FROM cte",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "WITH cte AS (SELECT 1 AS id, 'async_test' AS val) SELECT id, val FROM cte",
+                "async": True,
+            },
+        )
         submit_payload = _text_payload(r)
         assert submit_payload.get("success") is True, (
             f"Async submit failed: {submit_payload}"
@@ -263,10 +307,13 @@ class TestAsyncWorkflow:
         )
 
         # Step 3: get_instance for results
-        r3 = real_tools.call("get_instance", {
-            "project": project,
-            "instanceId": instance_id,
-        })
+        r3 = real_tools.call(
+            "get_instance",
+            {
+                "project": project,
+                "instanceId": instance_id,
+            },
+        )
         result_payload = _text_payload(r3)
         assert "results" in result_payload, (
             f"get_instance must return 'results', got: {result_payload}"
@@ -281,20 +328,26 @@ class TestAsyncWorkflow:
             pytest.skip("default_project not configured")
 
         # Submit a simple async query
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 42 AS answer",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 42 AS answer",
+                "async": True,
+            },
+        )
         submit_payload = _text_payload(r)
         assert submit_payload.get("success") is True
         instance_id = submit_payload["instanceId"]
 
         # Check status once (may be Running or already Terminated)
-        sr = real_tools.call("get_instance_status", {
-            "project": project,
-            "instanceId": instance_id,
-        })
+        sr = real_tools.call(
+            "get_instance_status",
+            {
+                "project": project,
+                "instanceId": instance_id,
+            },
+        )
         sp = _text_payload(sr)
         assert "instanceId" in sp, f"Missing instanceId: {sp}"
         assert "status" in sp, f"Missing status: {sp}"
@@ -315,11 +368,14 @@ class TestAsyncWorkflow:
         if not project:
             pytest.skip("default_project not configured")
 
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1 AS a, 2 AS b UNION ALL SELECT 3 AS a, 4 AS b",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1 AS a, 2 AS b UNION ALL SELECT 3 AS a, 4 AS b",
+                "async": True,
+            },
+        )
         sp = _text_payload(r)
         assert sp.get("success") is True
         instance_id = sp["instanceId"]
@@ -328,10 +384,13 @@ class TestAsyncWorkflow:
         _wait_for_instance(real_tools, project, instance_id, timeout=120)
 
         # Retrieve results
-        gr = real_tools.call("get_instance", {
-            "project": project,
-            "instanceId": instance_id,
-        })
+        gr = real_tools.call(
+            "get_instance",
+            {
+                "project": project,
+                "instanceId": instance_id,
+            },
+        )
         gp = _text_payload(gr)
         assert "results" in gp, f"get_instance missing results: {gp}"
         results = gp["results"]
@@ -349,7 +408,9 @@ class TestAsyncWorkflow:
                 break
             elif isinstance(task_entry, str) and task_entry.strip():
                 # Raw CSV format: first line is header, remaining are data rows
-                data_lines = [ln for ln in task_entry.strip().splitlines() if ln.strip()]
+                data_lines = [
+                    ln for ln in task_entry.strip().splitlines() if ln.strip()
+                ]
                 assert len(data_lines) >= 3, (
                     f"Expected header + >= 2 rows from UNION ALL SELECT, "
                     f"got {len(data_lines)} lines in {task_name!r}: {task_entry!r}"
@@ -366,6 +427,7 @@ class TestAsyncWorkflow:
 # 2.4  get_instance_status / get_instance — error scenarios
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestInstanceErrors:
     """Error scenarios for get_instance_status and get_instance."""
@@ -377,15 +439,16 @@ class TestInstanceErrors:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("get_instance_status", {
-            "project": project,
-            "instanceId": "nonexistent_instance_id_xyz_12345",
-        })
+        r = real_tools.call(
+            "get_instance_status",
+            {
+                "project": project,
+                "instanceId": "nonexistent_instance_id_xyz_12345",
+            },
+        )
         payload = _text_payload(r)
         has_error = payload.get("success") is False or "error" in payload
-        assert has_error, (
-            f"Expected error for non-existent instanceId, got: {payload}"
-        )
+        assert has_error, f"Expected error for non-existent instanceId, got: {payload}"
 
     def test_get_instance_nonexistent(
         self, real_tools: Tools, real_config: Any
@@ -394,12 +457,13 @@ class TestInstanceErrors:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("get_instance", {
-            "project": project,
-            "instanceId": "nonexistent_instance_id_xyz_12345",
-        })
+        r = real_tools.call(
+            "get_instance",
+            {
+                "project": project,
+                "instanceId": "nonexistent_instance_id_xyz_12345",
+            },
+        )
         payload = _text_payload(r)
         has_error = payload.get("success") is False or "error" in payload
-        assert has_error, (
-            f"Expected error for non-existent instanceId, got: {payload}"
-        )
+        assert has_error, f"Expected error for non-existent instanceId, got: {payload}"

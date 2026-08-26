@@ -16,15 +16,19 @@ This mixin wraps the read-modify-write + etag pattern so that LLM callers only
 need to specify a JSON patch; the client automatically fetches the latest etag
 and reapplies changes on top of the current server state.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, cast
 
 from pyodps_catalog import models as catalog_models
 
 from .mcp_protocol import mcp_text_result
 from .tools_common import opt_arg, require_arg
+
+if TYPE_CHECKING:
+    from .maxcompute_client import MaxComputeCatalogSdk
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +37,7 @@ logger = logging.getLogger(__name__)
 _LABELS_MODES = {"merge", "replace", "delete"}
 
 
-def _field_to_dict(field: catalog_models.TableFieldSchema) -> Dict[str, Any]:
+def _field_to_dict(field: catalog_models.TableFieldSchema) -> dict[str, Any]:
     """Serialize a TableFieldSchema (recursively) into a plain dict for display.
 
     Only business-facing fields are emitted: name/type/description/mode plus
@@ -41,7 +45,7 @@ def _field_to_dict(field: catalog_models.TableFieldSchema) -> Dict[str, Any]:
     precision, scale, maxLength, defaultValueExpression) are intentionally
     omitted to keep responses focused on the semantic layer.
     """
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "name": field.field_name or "",
         "type": field.sql_type_definition or "",
         "description": field.description or "",
@@ -55,9 +59,9 @@ def _field_to_dict(field: catalog_models.TableFieldSchema) -> Dict[str, Any]:
 
 
 def _find_field_by_path(
-    fields: List[catalog_models.TableFieldSchema],
-    path: List[str],
-) -> Optional[catalog_models.TableFieldSchema]:
+    fields: list[catalog_models.TableFieldSchema],
+    path: list[str],
+) -> catalog_models.TableFieldSchema | None:
     """Resolve a dotted field path against a list of fields.
 
     For example ``["addr", "city"]`` navigates ``addr.fields -> city``.
@@ -88,15 +92,27 @@ def _find_field_by_path(
 # TableFieldSchema so that columns.add never hits a 400.
 # ---------------------------------------------------------------------------
 
-_SIMPLE_TYPE_NAMES: frozenset = frozenset({
-    "BIGINT", "INT", "TINYINT", "SMALLINT",
-    "FLOAT", "DOUBLE",
-    "BOOLEAN",
-    "STRING", "BINARY",
-    "DATE", "DATETIME", "TIMESTAMP", "TIMESTAMP_NTZ",
-    "JSON", "BLOB",
-    "INTERVAL_DAY_TIME", "INTERVAL_YEAR_MONTH",
-})
+_SIMPLE_TYPE_NAMES: frozenset = frozenset(
+    {
+        "BIGINT",
+        "INT",
+        "TINYINT",
+        "SMALLINT",
+        "FLOAT",
+        "DOUBLE",
+        "BOOLEAN",
+        "STRING",
+        "BINARY",
+        "DATE",
+        "DATETIME",
+        "TIMESTAMP",
+        "TIMESTAMP_NTZ",
+        "JSON",
+        "BLOB",
+        "INTERVAL_DAY_TIME",
+        "INTERVAL_YEAR_MONTH",
+    }
+)
 
 # Maximum nesting depth for complex types (ARRAY / MAP / STRUCT).
 # _parse_sql_type and _parse_complex_type are mutually recursive; without a
@@ -127,11 +143,11 @@ def _find_close_bracket(s: str, open_pos: int, open_ch: str, close_ch: str) -> i
     raise ValueError(f"Unmatched '{open_ch}' in type string: {s!r}")
 
 
-def _split_top_level(s: str, sep: str = ",") -> List[str]:
+def _split_top_level(s: str, sep: str = ",") -> list[str]:
     """Split *s* by *sep*, ignoring separators inside ``<>`` or ``()``."""
     depth = 0
-    parts: List[str] = []
-    buf: List[str] = []
+    parts: list[str] = []
+    buf: list[str] = []
     for ch in s:
         if ch in "<(":
             depth += 1
@@ -269,7 +285,9 @@ def _parse_param_type(base: str, inner: str) -> catalog_models.TableFieldSchema:
     return f
 
 
-def _parse_complex_type(base: str, inner: str, _depth: int = 0) -> catalog_models.TableFieldSchema:
+def _parse_complex_type(
+    base: str, inner: str, _depth: int = 0
+) -> catalog_models.TableFieldSchema:
     """Parse ARRAY<…>, MAP<…>, or STRUCT<…>. ``_depth``: see :func:`_parse_sql_type`.
 
     Note: callers already increment _depth by 1 before passing it here, so
@@ -304,8 +322,10 @@ def _parse_complex_type(base: str, inner: str, _depth: int = 0) -> catalog_model
     elif base == "STRUCT":
         col_strs = _split_top_level(inner, ",")
         if not col_strs:
-            raise ValueError("STRUCT requires at least one field: STRUCT<name:type, \u2026>.")
-        sub_fields: List[catalog_models.TableFieldSchema] = []
+            raise ValueError(
+                "STRUCT requires at least one field: STRUCT<name:type, \u2026>."
+            )
+        sub_fields: list[catalog_models.TableFieldSchema] = []
         for part in col_strs:
             colon = _find_colon_top_level(part)
             if colon == -1:
@@ -330,14 +350,14 @@ def _parse_complex_type(base: str, inner: str, _depth: int = 0) -> catalog_model
     return f
 
 
-def _iter_partition_definition_columns(partition_definition: Any) -> List[Any]:
+def _iter_partition_definition_columns(partition_definition: Any) -> list[Any]:
     """Partition columns from SDK ``PartitionDefinition`` (`partitioned_columns` / JSON ``partitionedColumns``)."""
     if partition_definition is None:
         return []
     return list(getattr(partition_definition, "partitioned_columns", None) or [])
 
 
-def serialize_table_meta(t: catalog_models.Table) -> Dict[str, Any]:
+def serialize_table_meta(t: catalog_models.Table) -> dict[str, Any]:
     """Flatten a Table model into a compact, business-semantic dict.
 
     Exposes only the fields that are meaningful to business users and mutable
@@ -348,12 +368,12 @@ def serialize_table_meta(t: catalog_models.Table) -> Dict[str, Any]:
     typeCategory/precision/scale/maxLength/defaultValueExpression) are
     deliberately left out to keep responses focused and token-cheap.
     """
-    columns_out: List[Dict[str, Any]] = []
+    columns_out: list[dict[str, Any]] = []
     if t.table_schema and t.table_schema.fields:
         for f in t.table_schema.fields:
             columns_out.append(_field_to_dict(f))
 
-    expiration: Dict[str, Any] = {}
+    expiration: dict[str, Any] = {}
     if t.expiration_options is not None:
         days = t.expiration_options.expiration_days
         part_days = t.expiration_options.partition_expiration_days
@@ -393,7 +413,11 @@ class TableMetaMixin:
     Expects the host class to provide: ``sdk``, ``default_project``.
     """
 
-    def update_table(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    if TYPE_CHECKING:
+        sdk: MaxComputeCatalogSdk
+        default_project: str
+
+    def update_table(self, args: dict[str, Any]) -> dict[str, Any]:
         """Apply a structured patch to an existing table.
 
         Input shape (all patch groups optional; at least one must be present)::
@@ -421,7 +445,7 @@ class TableMetaMixin:
 
         try:
             plan = self._normalize_patch(args)
-        except ValueError as e:
+        except (TypeError, ValueError) as e:
             return mcp_text_result({"success": False, "error": str(e)})
 
         if not plan:
@@ -478,19 +502,19 @@ class TableMetaMixin:
     # ---- internals ----
 
     @staticmethod
-    def _normalize_patch(args: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_patch(args: dict[str, Any]) -> dict[str, Any]:
         """Validate input shape and return a normalized plan dict.
 
         Unknown/empty patch groups are dropped, so ``if not plan`` lets the
         caller return a clean "no changes" error.
         """
-        plan: Dict[str, Any] = {}
+        plan: dict[str, Any] = {}
 
         if "description" in args:
             desc = args.get("description")
             if desc is None:
                 raise ValueError(
-                    "description cannot be null; use empty string \"\" to clear, "
+                    'description cannot be null; use empty string "" to clear, '
                     "or omit the key to skip."
                 )
             if not isinstance(desc, str):
@@ -506,7 +530,9 @@ class TableMetaMixin:
             lset = labels.get("set")
             lmode = labels.get("mode", "merge")
             if lset is None or not isinstance(lset, dict):
-                raise ValueError("labels.set must be an object of string key/value pairs.")
+                raise ValueError(
+                    "labels.set must be an object of string key/value pairs."
+                )
             if lmode not in _LABELS_MODES:
                 raise ValueError(
                     f"labels.mode must be one of {sorted(_LABELS_MODES)}; got {lmode!r}."
@@ -519,8 +545,10 @@ class TableMetaMixin:
         expiration = args.get("expiration")
         if expiration is not None:
             if not isinstance(expiration, dict):
-                raise ValueError("expiration must be an object {days?, partitionDays?}.")
-            norm_exp: Dict[str, int] = {}
+                raise ValueError(
+                    "expiration must be an object {days?, partitionDays?}."
+                )
+            norm_exp: dict[str, int] = {}
             for key, dst in (("days", "days"), ("partitionDays", "partitionDays")):
                 if key not in expiration:
                     continue
@@ -542,20 +570,26 @@ class TableMetaMixin:
                 raise ValueError(
                     "columns must be an object {setComments?, setNullable?, add?}."
                 )
-            norm_cols: Dict[str, Any] = {}
+            norm_cols: dict[str, Any] = {}
 
             set_comments = columns.get("setComments")
             if set_comments is not None:
                 if not isinstance(set_comments, dict):
-                    raise ValueError("columns.setComments must be an object of column → comment.")
-                norm_cols["setComments"] = {str(k): str(v or "") for k, v in set_comments.items()}
+                    raise ValueError(
+                        "columns.setComments must be an object of column → comment."
+                    )
+                norm_cols["setComments"] = {
+                    str(k): str(v or "") for k, v in set_comments.items()
+                }
 
             set_nullable = columns.get("setNullable")
             if set_nullable is not None:
                 if not isinstance(set_nullable, list) or any(
                     not isinstance(x, str) for x in set_nullable
                 ):
-                    raise ValueError("columns.setNullable must be an array of column name strings.")
+                    raise ValueError(
+                        "columns.setNullable must be an array of column name strings."
+                    )
                 for col in set_nullable:
                     if "." in col:
                         raise ValueError(
@@ -571,7 +605,7 @@ class TableMetaMixin:
                 norm_add = []
                 for i, c in enumerate(add):
                     if not isinstance(c, dict):
-                        raise ValueError(f"columns.add[{i}] must be an object.")
+                        raise TypeError(f"columns.add[{i}] must be an object.")
                     if not c.get("name"):
                         raise ValueError(f"columns.add[{i}] missing 'name'.")
                     if not c.get("type"):
@@ -582,11 +616,13 @@ class TableMetaMixin:
                     # description where "" means "clear the comment".
                     raw_desc = c.get("description")
                     description = raw_desc if raw_desc else None
-                    norm_add.append({
-                        "name": str(c["name"]),
-                        "type": str(c["type"]),
-                        "description": description,
-                    })
+                    norm_add.append(
+                        {
+                            "name": str(c["name"]),
+                            "type": str(c["type"]),
+                            "description": description,
+                        }
+                    )
                 if norm_add:
                     norm_cols["add"] = norm_add
 
@@ -598,10 +634,10 @@ class TableMetaMixin:
     def _apply_plan(
         self,
         current: catalog_models.Table,
-        plan: Dict[str, Any],
-    ) -> List[str]:
+        plan: dict[str, Any],
+    ) -> list[str]:
         """Mutate ``current`` per a normalized plan; return touched field keys."""
-        touched: List[str] = []
+        touched: list[str] = []
 
         if "description" in plan:
             current.description = plan["description"]
@@ -614,7 +650,7 @@ class TableMetaMixin:
             if mode == "replace":
                 current.labels = dict(new_labels)
             elif mode == "delete":
-                for k in new_labels.keys():
+                for k in new_labels:
                     existing.pop(k, None)
                 current.labels = existing
             else:  # merge
@@ -633,7 +669,9 @@ class TableMetaMixin:
                 for c in cols_plan["add"]:
                     name = c["name"]
                     if name in existing_names:
-                        raise ValueError(f"columns.add: column {name!r} already exists.")
+                        raise ValueError(
+                            f"columns.add: column {name!r} already exists."
+                        )
                     try:
                         new_field = _parse_sql_type(c["type"])
                     except ValueError as exc:
@@ -651,7 +689,9 @@ class TableMetaMixin:
             for path, desc in (cols_plan.get("setComments") or {}).items():
                 target = _find_field_by_path(fields, path.split("."))
                 if target is None:
-                    raise ValueError(f"columns.setComments: column path {path!r} not found.")
+                    raise ValueError(
+                        f"columns.setComments: column path {path!r} not found."
+                    )
                 target.description = desc
             if cols_plan.get("setComments"):
                 touched.append("columns.setComments")
@@ -678,11 +718,10 @@ class TableMetaMixin:
     @staticmethod
     def _ensure_fields(
         current: catalog_models.Table,
-    ) -> List[catalog_models.TableFieldSchema]:
+    ) -> list[catalog_models.TableFieldSchema]:
         """Return the table's top-level field list, creating the schema wrapper if missing."""
         if current.table_schema is None:
             current.table_schema = catalog_models.TableFieldSchema()
         if current.table_schema.fields is None:
             current.table_schema.fields = []
-        return current.table_schema.fields
-
+        return cast(list[catalog_models.TableFieldSchema], current.table_schema.fields)

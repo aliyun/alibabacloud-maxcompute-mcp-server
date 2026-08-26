@@ -6,31 +6,103 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
+          cache-dependency-glob: uv.lock
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - name: Set up Python
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv python install "$PYTHON_VERSION"
 
       - name: Install dependencies
-        run: uv sync --group dev
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: uv sync --frozen --all-extras --all-groups --python "$PYTHON_VERSION"
 
-      - name: Run tests
-        run: uv run pytest tests/ -q --no-cov
+      - name: Run tests and coverage gates
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          if [ "$PYTHON_VERSION" = "3.10" ]; then
+            uv run pytest tests/ -q \
+              --cov=maxcompute_catalog_mcp \
+              --cov-report=xml \
+              --cov-report=html:htmlcov \
+              --cov-report=term-missing:skip-covered \
+              --cov-fail-under=80
+            uv run coverage json -o coverage.json
+            uv run python scripts/check_coverage.py coverage.json \
+              --line-fail-under 80 \
+              --branch-fail-under 90
+          else
+            uv run pytest tests/ -q --no-cov
+          fi
 
-      - name: Build source distribution
+      - name: Build distributions
+        if: matrix.python-version == '3.12'
         run: uv build
+
+      - name: Check package metadata and wheel contents
+        if: matrix.python-version == '3.12'
+        run: |
+          uvx --from twine twine check --strict dist/*
+          uvx check-wheel-contents dist/*.whl
+
+      - name: Smoke test remote-first and local installations
+        if: matrix.python-version == '3.12'
+        run: |
+          smoke_dir=$(mktemp -d)
+          wheel=$(find "$PWD/dist" -name '*.whl' -print -quit)
+
+          uv venv "$smoke_dir/base" --python 3.12
+          uv pip install --python "$smoke_dir/base/bin/python" "$wheel"
+          "$smoke_dir/base/bin/python" - <<'PY'
+          import importlib.util
+          import maxcompute_catalog_mcp.server
+
+          assert importlib.util.find_spec("odps") is None
+          assert importlib.util.find_spec("pyarrow") is None
+          PY
+          "$smoke_dir/base/bin/alibabacloud-maxcompute-mcp-server" --help
+          set +e
+          local_error=$("$smoke_dir/base/bin/alibabacloud-maxcompute-mcp-server" \
+            --mode local 2>&1)
+          local_status=$?
+          set -e
+          test "$local_status" -ne 0
+          case "$local_error" in
+            *"alibabacloud-maxcompute-mcp-server[local]"*) ;;
+            *) exit 1 ;;
+          esac
+
+          uv venv "$smoke_dir/local" --python 3.12
+          uv pip install --python "$smoke_dir/local/bin/python" \
+            "alibabacloud-maxcompute-mcp-server[local] @ file://$wheel"
+          "$smoke_dir/local/bin/python" -c 'import odps; import pyarrow'

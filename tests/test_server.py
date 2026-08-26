@@ -1,9 +1,11 @@
 """Unit tests for server.py — _parse_args(), build_tools(), _build_mcp_server()."""
+
 from __future__ import annotations
 
 import asyncio
 import inspect
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +39,7 @@ from maxcompute_catalog_mcp.tools_common import ToolSpec
 # _parse_args() tests
 # ---------------------------------------------------------------------------
 
+
 class TestParseArgs:
     def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(sys, "argv", ["alibabacloud-maxcompute-mcp-server"])
@@ -47,13 +50,21 @@ class TestParseArgs:
         assert port == 8000
 
     def test_custom(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sys, "argv", [
-            "alibabacloud-maxcompute-mcp-server",
-            "--config", "/tmp/c.json",
-            "--transport", "http",
-            "--host", "0.0.0.0",
-            "--port", "9000",
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "alibabacloud-maxcompute-mcp-server",
+                "--config",
+                "/tmp/c.json",
+                "--transport",
+                "http",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9000",
+            ],
+        )
         config_path, transport, host, port = _parse_args()
         assert config_path is not None and config_path.endswith("c.json")
         assert transport == "http"
@@ -61,9 +72,15 @@ class TestParseArgs:
         assert port == 9000
 
     def test_streamable_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(sys, "argv", [
-            "alibabacloud-maxcompute-mcp-server", "--transport", "streamable-http",
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "alibabacloud-maxcompute-mcp-server",
+                "--transport",
+                "streamable-http",
+            ],
+        )
         _, transport, _, _ = _parse_args()
         assert transport == "streamable-http"
 
@@ -151,19 +168,21 @@ def test_main_remote_mode_builds_token_provider_but_not_local_tools(
 
     token_provider = MagicMock()
     token_provider.get_access_token = AsyncMock(return_value="catalog-token")
-    with patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock, \
-         patch(
-             "maxcompute_catalog_mcp.server.build_remote_token_provider",
-             return_value=token_provider,
-         ) as build_provider_mock, \
-         patch(
-             "maxcompute_catalog_mcp.server._run_remote_proxy",
-             new_callable=AsyncMock,
-         ) as run_remote_mock, \
-         patch(
-             "maxcompute_catalog_mcp.server._probe_remote_mcp",
-             new_callable=AsyncMock,
-         ) as probe_remote_mock:
+    with (
+        patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock,
+        patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=token_provider,
+        ) as build_provider_mock,
+        patch(
+            "maxcompute_catalog_mcp.server._run_remote_proxy",
+            new_callable=AsyncMock,
+        ) as run_remote_mock,
+        patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+        ) as probe_remote_mock,
+    ):
         main()
 
     build_tools_mock.assert_not_called()
@@ -187,18 +206,23 @@ class TestDefaultMode:
     def test_successful_remote_initialize_selects_transparent_proxy(self) -> None:
         provider = MagicMock()
         provider.get_access_token = AsyncMock(return_value="catalog-token")
-        with patch(
-            "maxcompute_catalog_mcp.server.build_remote_token_provider",
-            return_value=provider,
-        ) as build_provider_mock, patch(
-            "maxcompute_catalog_mcp.server._probe_remote_mcp",
-            new_callable=AsyncMock,
-        ) as probe_mock, patch(
-            "maxcompute_catalog_mcp.server._run_remote_proxy",
-            new_callable=AsyncMock,
-        ) as remote_mock, patch(
-            "maxcompute_catalog_mcp.server.build_tools",
-        ) as build_tools_mock:
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ) as build_provider_mock,
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+            ) as probe_mock,
+            patch(
+                "maxcompute_catalog_mcp.server._run_remote_proxy",
+                new_callable=AsyncMock,
+            ) as remote_mock,
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+            ) as build_tools_mock,
+        ):
             asyncio.run(_run_default_stdio(self._runtime(), "/fake/config.json"))
 
         build_provider_mock.assert_called_once_with("/fake/config.json", "daily")
@@ -212,19 +236,24 @@ class TestDefaultMode:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         local_tools = MagicMock()
-        with patch(
-            "maxcompute_catalog_mcp.server.build_remote_token_provider",
-            side_effect=RuntimeError("token issuance failed"),
-        ), patch(
-            "maxcompute_catalog_mcp.server._probe_remote_mcp",
-            new_callable=AsyncMock,
-        ) as probe_mock, patch(
-            "maxcompute_catalog_mcp.server.build_tools",
-            return_value=local_tools,
-        ) as build_tools_mock, patch(
-            "maxcompute_catalog_mcp.server._run_stdio",
-            new_callable=AsyncMock,
-        ) as local_mock:
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                side_effect=RuntimeError("token issuance failed"),
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+            ) as probe_mock,
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+                return_value=local_tools,
+            ) as build_tools_mock,
+            patch(
+                "maxcompute_catalog_mcp.server._run_stdio",
+                new_callable=AsyncMock,
+            ) as local_mock,
+        ):
             asyncio.run(_run_default_stdio(self._runtime(), "/fake/config.json"))
 
         probe_mock.assert_not_awaited()
@@ -241,23 +270,29 @@ class TestDefaultMode:
         provider = MagicMock()
         provider.get_access_token = AsyncMock(return_value="catalog-token")
         local_tools = MagicMock()
-        with patch(
-            "maxcompute_catalog_mcp.server.build_remote_token_provider",
-            return_value=provider,
-        ), patch(
-            "maxcompute_catalog_mcp.server._probe_remote_mcp",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("gateway authentication failed"),
-        ) as probe_mock, patch(
-            "maxcompute_catalog_mcp.server._run_remote_proxy",
-            new_callable=AsyncMock,
-        ) as remote_mock, patch(
-            "maxcompute_catalog_mcp.server.build_tools",
-            return_value=local_tools,
-        ), patch(
-            "maxcompute_catalog_mcp.server._run_stdio",
-            new_callable=AsyncMock,
-        ) as local_mock:
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("gateway authentication failed"),
+            ) as probe_mock,
+            patch(
+                "maxcompute_catalog_mcp.server._run_remote_proxy",
+                new_callable=AsyncMock,
+            ) as remote_mock,
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+                return_value=local_tools,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._run_stdio",
+                new_callable=AsyncMock,
+            ) as local_mock,
+        ):
             asyncio.run(_run_default_stdio(self._runtime(), None))
 
         probe_mock.assert_awaited_once_with(self._runtime().remote, provider)
@@ -277,19 +312,24 @@ class TestDefaultMode:
             await selected_provider.get_access_token()
             await selected_provider.get_access_token()
 
-        with patch(
-            "maxcompute_catalog_mcp.server.build_remote_token_provider",
-            return_value=provider,
-        ), patch(
-            "maxcompute_catalog_mcp.server._probe_remote_mcp",
-            new_callable=AsyncMock,
-        ) as probe_mock, patch(
-            "maxcompute_catalog_mcp.server._run_remote_proxy",
-            new_callable=AsyncMock,
-            side_effect=simulate_runtime_refresh,
-        ), patch(
-            "maxcompute_catalog_mcp.server.build_tools",
-        ) as build_tools_mock:
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+            ) as probe_mock,
+            patch(
+                "maxcompute_catalog_mcp.server._run_remote_proxy",
+                new_callable=AsyncMock,
+                side_effect=simulate_runtime_refresh,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+            ) as build_tools_mock,
+        ):
             asyncio.run(_run_default_stdio(runtime, "/fake/config.json"))
 
         probe_mock.assert_awaited_once_with(runtime.remote, provider)
@@ -301,21 +341,27 @@ class TestDefaultMode:
     ) -> None:
         provider = MagicMock()
         provider.get_access_token = AsyncMock(return_value="catalog-token")
-        with patch(
-            "maxcompute_catalog_mcp.server.build_remote_token_provider",
-            return_value=provider,
-        ), patch(
-            "maxcompute_catalog_mcp.server._probe_remote_mcp",
-            new_callable=AsyncMock,
-        ), patch(
-            "maxcompute_catalog_mcp.server._run_remote_proxy",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("remote session lost"),
-        ), patch(
-            "maxcompute_catalog_mcp.server.build_tools",
-        ) as build_tools_mock, pytest.raises(
-            RuntimeError,
-            match="remote session lost",
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._run_remote_proxy",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("remote session lost"),
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+            ) as build_tools_mock,
+            pytest.raises(
+                RuntimeError,
+                match="remote session lost",
+            ),
         ):
             asyncio.run(_run_default_stdio(self._runtime(), None))
 
@@ -326,16 +372,20 @@ def test_forced_remote_initialize_failure_is_fail_closed() -> None:
     config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
     provider = MagicMock()
     provider.get_access_token = AsyncMock(return_value="catalog-token")
-    with patch(
-        "maxcompute_catalog_mcp.server._probe_remote_mcp",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("unauthorized"),
-    ), patch(
-        "maxcompute_catalog_mcp.server._run_remote_proxy",
-        new_callable=AsyncMock,
-    ) as remote_mock, pytest.raises(
-        RemoteInitializationError,
-        match="initialization failed",
+    with (
+        patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("unauthorized"),
+        ),
+        patch(
+            "maxcompute_catalog_mcp.server._run_remote_proxy",
+            new_callable=AsyncMock,
+        ) as remote_mock,
+        pytest.raises(
+            RemoteInitializationError,
+            match="initialization failed",
+        ),
     ):
         asyncio.run(_run_forced_remote_stdio(config, provider))
 
@@ -348,19 +398,22 @@ def test_token_failure_does_not_probe_remote_endpoint() -> None:
     provider.get_access_token = AsyncMock(
         side_effect=RuntimeError("token issuance failed")
     )
-    with patch(
-        "maxcompute_catalog_mcp.server._probe_remote_mcp",
-        new_callable=AsyncMock,
-    ) as probe_mock, pytest.raises(
-        RemoteInitializationError,
-        match="token issuance failed",
+    with (
+        patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+        ) as probe_mock,
+        pytest.raises(
+            RemoteInitializationError,
+            match="token issuance failed",
+        ),
     ):
         asyncio.run(_initialize_remote_mcp(config, provider))
 
     probe_mock.assert_not_awaited()
 
 
-@patch("maxcompute_catalog_mcp.server.build_client_set")
+@patch("maxcompute_catalog_mcp.server.build_catalog_client_set")
 @patch("maxcompute_catalog_mcp.server.load_configs")
 def test_build_remote_token_provider_reuses_selected_catalog_sdk(
     mock_load,
@@ -368,9 +421,7 @@ def test_build_remote_token_provider_reuses_selected_catalog_sdk(
 ) -> None:
     config = MaxComputeCatalogConfig(
         catalogapi_endpoint="https://catalog.example.com",
-        maxcompute_endpoint=(
-            "https://service.cn-hangzhou.maxcompute.aliyun.com/api"
-        ),
+        maxcompute_endpoint=("https://service.cn-hangzhou.maxcompute.aliyun.com/api"),
         access_key_id="fixture-ak",
         access_key_secret="fixture-sk",
     )
@@ -386,9 +437,39 @@ def test_build_remote_token_provider_reuses_selected_catalog_sdk(
     mock_build.assert_called_once_with(config)
 
 
+def test_remote_server_import_does_not_require_local_sdk() -> None:
+    """The remote-first entry point must import when ODPS is unavailable."""
+
+    script = """
+import builtins
+import sys
+
+original_import = builtins.__import__
+
+def block_local_sdk(name, *args, **kwargs):
+    if name == "odps" or name.startswith("odps."):
+        raise ModuleNotFoundError("No module named 'odps'", name="odps")
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = block_local_sdk
+import maxcompute_catalog_mcp.server
+assert "maxcompute_catalog_mcp.tools" not in sys.modules
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 # ---------------------------------------------------------------------------
 # build_tools() tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildTools:
     """build_tools() now orchestrates load_configs() + build_client_set().
@@ -447,7 +528,10 @@ class TestBuildTools:
     @patch("maxcompute_catalog_mcp.server.build_client_set")
     @patch("maxcompute_catalog_mcp.server.load_configs")
     def test_credential_failure_exits(self, mock_load, mock_build) -> None:
-        mock_load.return_value = ({"default": self._cfg(access_key_id="", access_key_secret="")}, "default")
+        mock_load.return_value = (
+            {"default": self._cfg(access_key_id="", access_key_secret="")},
+            "default",
+        )
         mock_build.side_effect = ValueError("no credentials")
 
         with pytest.raises(SystemExit) as exc_info:
@@ -470,8 +554,12 @@ class TestBuildTools:
     @patch("maxcompute_catalog_mcp.server.load_configs")
     def test_builds_only_default_config(self, mock_load, mock_build) -> None:
         """With multiple configs, build_tools builds the client set for the default only."""
-        cfg_a = self._cfg(maxcompute_endpoint="https://a.example.com", default_project="pa")
-        cfg_b = self._cfg(maxcompute_endpoint="https://b.example.com", default_project="pb")
+        cfg_a = self._cfg(
+            maxcompute_endpoint="https://a.example.com", default_project="pa"
+        )
+        cfg_b = self._cfg(
+            maxcompute_endpoint="https://b.example.com", default_project="pb"
+        )
         mock_load.return_value = ({"a": cfg_a, "b": cfg_b}, "b")
         mock_build.return_value = self._client_set(default_project="pb")
 
@@ -483,7 +571,9 @@ class TestBuildTools:
 
     @patch("maxcompute_catalog_mcp.server.build_client_set")
     @patch("maxcompute_catalog_mcp.server.load_configs")
-    def test_profile_selects_named_config_at_startup(self, mock_load, mock_build) -> None:
+    def test_profile_selects_named_config_at_startup(
+        self, mock_load, mock_build
+    ) -> None:
         cfg_a = self._cfg(maxcompute_endpoint="https://a.example.com")
         cfg_b = self._cfg(maxcompute_endpoint="https://b.example.com")
         mock_load.return_value = ({"a": cfg_a, "b": cfg_b}, "a")
@@ -509,6 +599,33 @@ class TestBuildTools:
             build_tools()
         assert "Invalid MaxCompute config" in str(exc_info.value.code)
 
+    @patch("maxcompute_catalog_mcp.server.load_configs")
+    def test_invalid_config_type_exits(self, mock_load) -> None:
+        mock_load.side_effect = TypeError("config must be an object")
+
+        with pytest.raises(SystemExit) as exc_info:
+            build_tools()
+
+        assert "Invalid MaxCompute config" in str(exc_info.value.code)
+
+    @patch("maxcompute_catalog_mcp.server._load_local_tools_type")
+    def test_missing_local_extra_exits_with_install_command(
+        self, mock_load_type
+    ) -> None:
+        from maxcompute_catalog_mcp.server import LocalDependenciesMissingError
+
+        mock_load_type.side_effect = LocalDependenciesMissingError(
+            "Local MCP mode requires optional SDK dependencies. Install them with: "
+            "pip install 'alibabacloud-maxcompute-mcp-server[local]'"
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            build_tools()
+
+        message = str(exc_info.value.code)
+        assert "optional SDK dependencies" in message
+        assert "[local]" in message
+
     @patch("maxcompute_catalog_mcp.server.build_client_set")
     @patch("maxcompute_catalog_mcp.server.load_configs")
     def test_unexpected_error_exits(self, mock_load, mock_build) -> None:
@@ -522,6 +639,7 @@ class TestBuildTools:
 # ---------------------------------------------------------------------------
 # _build_mcp_server() tests — actually invoke the registered handlers
 # ---------------------------------------------------------------------------
+
 
 class TestBuildMcpServer:
     def test_list_tools_handler_invokes_tools_specs(self) -> None:
@@ -580,7 +698,9 @@ class TestBuildMcpServer:
         mock_tools = MagicMock()
         mock_tools.specs.return_value = [spec]
         mock_tools.call.side_effect = JsonRpcError(
-            code=-32000, message="bad input", data={"field": "x"},
+            code=-32000,
+            message="bad input",
+            data={"field": "x"},
         )
 
         server = _build_mcp_server(mock_tools)
@@ -595,9 +715,7 @@ class TestBuildMcpServer:
         )
         assert call_result.is_error is True
         joined = " ".join(
-            content.text
-            for content in call_result.content
-            if content.type == "text"
+            content.text for content in call_result.content if content.type == "text"
         )
         assert "bad input" in joined
 
@@ -605,6 +723,7 @@ class TestBuildMcpServer:
 # ---------------------------------------------------------------------------
 # _run_stdio() tests
 # ---------------------------------------------------------------------------
+
 
 class TestRunStdio:
     def test_run_stdio_calls_server_run(self) -> None:
@@ -619,9 +738,13 @@ class TestRunStdio:
             yield mock_read, mock_write
 
         mock_tools = MagicMock()
-        with patch("maxcompute_catalog_mcp.server._build_mcp_server") as mock_build, \
-             patch.dict("sys.modules", {"mcp.server.stdio": MagicMock(stdio_server=fake_stdio_server)}):
-
+        with (
+            patch("maxcompute_catalog_mcp.server._build_mcp_server") as mock_build,
+            patch.dict(
+                "sys.modules",
+                {"mcp.server.stdio": MagicMock(stdio_server=fake_stdio_server)},
+            ),
+        ):
             mock_server = MagicMock()
             mock_server.run = AsyncMock()
             mock_server.create_initialization_options.return_value = {"init": True}
@@ -631,13 +754,16 @@ class TestRunStdio:
 
             mock_build.assert_called_once_with(mock_tools)
             mock_server.run.assert_called_once_with(
-                mock_read, mock_write, {"init": True},
+                mock_read,
+                mock_write,
+                {"init": True},
             )
 
 
 # ---------------------------------------------------------------------------
 # _run_http() tests
 # ---------------------------------------------------------------------------
+
 
 class TestRunHttp:
     def test_run_http_starts_uvicorn(self) -> None:
@@ -656,8 +782,10 @@ class TestRunHttp:
             "uvicorn": mock_uvicorn,
         }
 
-        with patch("maxcompute_catalog_mcp.server._build_mcp_server") as mock_build, \
-             patch.dict("sys.modules", fake_http_mods):
+        with (
+            patch("maxcompute_catalog_mcp.server._build_mcp_server") as mock_build,
+            patch.dict("sys.modules", fake_http_mods),
+        ):
             mock_server = MagicMock()
             mock_build.return_value = mock_server
 
@@ -703,9 +831,7 @@ class TestRunHttp:
                     "method": "server/discover",
                     "params": {
                         "_meta": {
-                            "io.modelcontextprotocol/protocolVersion": (
-                                "2026-07-28"
-                            ),
+                            "io.modelcontextprotocol/protocolVersion": ("2026-07-28"),
                             "io.modelcontextprotocol/clientCapabilities": {},
                             "io.modelcontextprotocol/clientInfo": {
                                 "name": "local-http-test",
@@ -727,14 +853,32 @@ class TestRunHttp:
 # main() tests
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
+    def test_invalid_runtime_config_type_exits(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["alibabacloud-maxcompute-mcp-server"])
+
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.load_runtime_config",
+                side_effect=TypeError("runtime config must be an object"),
+            ),
+            pytest.raises(SystemExit, match="Invalid MCP runtime config"),
+        ):
+            main()
+
     def test_main_stdio_transport(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """main() with default transport calls asyncio.run with the _run_stdio coroutine."""
         monkeypatch.setattr(sys, "argv", ["alibabacloud-maxcompute-mcp-server"])
         mock_tools = MagicMock()
 
-        with patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools), \
-             patch("maxcompute_catalog_mcp.server.asyncio") as mock_asyncio:
+        with (
+            patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools),
+            patch("maxcompute_catalog_mcp.server.asyncio") as mock_asyncio,
+        ):
             main()
             mock_asyncio.run.assert_called_once()
             # Verify the actual coroutine passed to asyncio.run is from _run_stdio
@@ -746,28 +890,51 @@ class TestMain:
 
     def test_main_http_transport(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """main() with --transport http calls _run_http."""
-        monkeypatch.setattr(sys, "argv", [
-            "alibabacloud-maxcompute-mcp-server", "--transport", "http",
-            "--host", "0.0.0.0", "--port", "9000",
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "alibabacloud-maxcompute-mcp-server",
+                "--transport",
+                "http",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9000",
+            ],
+        )
         mock_tools = MagicMock()
 
-        with patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools), \
-             patch("maxcompute_catalog_mcp.server._run_http") as mock_run_http:
+        with (
+            patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools),
+            patch("maxcompute_catalog_mcp.server._run_http") as mock_run_http,
+        ):
             main()
             mock_run_http.assert_called_once_with(mock_tools, host="0.0.0.0", port=9000)
 
-    def test_main_streamable_http_transport(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_main_streamable_http_transport(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """main() with --transport streamable-http calls _run_http."""
-        monkeypatch.setattr(sys, "argv", [
-            "alibabacloud-maxcompute-mcp-server", "--transport", "streamable-http",
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "alibabacloud-maxcompute-mcp-server",
+                "--transport",
+                "streamable-http",
+            ],
+        )
         mock_tools = MagicMock()
 
-        with patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools), \
-             patch("maxcompute_catalog_mcp.server._run_http") as mock_run_http:
+        with (
+            patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools),
+            patch("maxcompute_catalog_mcp.server._run_http") as mock_run_http,
+        ):
             main()
-            mock_run_http.assert_called_once_with(mock_tools, host="127.0.0.1", port=8000)
+            mock_run_http.assert_called_once_with(
+                mock_tools, host="127.0.0.1", port=8000
+            )
 
     def test_main_configures_logging(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """main() configures logging before anything else."""
@@ -775,14 +942,24 @@ class TestMain:
 
         # Use http transport + patch _run_http to avoid creating an un-awaited
         # _run_stdio coroutine (which would leak a RuntimeWarning).
-        monkeypatch.setattr(sys, "argv", [
-            "alibabacloud-maxcompute-mcp-server", "--transport", "http",
-        ])
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "alibabacloud-maxcompute-mcp-server",
+                "--transport",
+                "http",
+            ],
+        )
         mock_tools = MagicMock()
 
-        with patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools), \
-             patch("maxcompute_catalog_mcp.server._run_http"), \
-             patch("maxcompute_catalog_mcp.server.logging.basicConfig") as mock_basic_config:
+        with (
+            patch("maxcompute_catalog_mcp.server.build_tools", return_value=mock_tools),
+            patch("maxcompute_catalog_mcp.server._run_http"),
+            patch(
+                "maxcompute_catalog_mcp.server.logging.basicConfig"
+            ) as mock_basic_config,
+        ):
             main()
             mock_basic_config.assert_called_once()
             kwargs = mock_basic_config.call_args.kwargs

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """E2E tests: output_uri file streaming, get_instance(output_uri),
 SHOW/DESC raw results, and illegal scheme validation.
 
@@ -15,11 +14,11 @@ by E2E tests, including:
 
 Requires config.json (or MAXCOMPUTE_CATALOG_CONFIG env var).
 """
+
 from __future__ import annotations
 
 import json
 import logging
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,11 @@ import pytest
 from maxcompute_catalog_mcp.tools import Tools
 from tests.conftest import (
     async_wait_instance as _wait_for_instance,
-    data as _data,
+)
+from tests.conftest import (
     has_config as _has_config,
+)
+from tests.conftest import (
     text_payload as _text_payload,
 )
 
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 1. output_uri validation (illegal scheme)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestOutputUriValidation:
@@ -52,13 +55,16 @@ class TestOutputUriValidation:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-            "async": False,
-            "timeout": 30,
-            "output_uri": "http://example.com/result.jsonl",
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+                "async": False,
+                "timeout": 30,
+                "output_uri": "http://example.com/result.jsonl",
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, (
             f"Expected failure for http:// scheme, got: {payload}"
@@ -74,13 +80,16 @@ class TestOutputUriValidation:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-            "async": False,
-            "timeout": 30,
-            "output_uri": "s3://bucket/result.jsonl",
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+                "async": False,
+                "timeout": 30,
+                "output_uri": "s3://bucket/result.jsonl",
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, (
             f"Expected failure for s3:// scheme, got: {payload}"
@@ -93,13 +102,16 @@ class TestOutputUriValidation:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-            "async": False,
-            "timeout": 30,
-            "output_uri": "",
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+                "async": False,
+                "timeout": 30,
+                "output_uri": "",
+            },
+        )
         payload = _text_payload(r)
         # Empty string is falsy in Python; the code treats it as "no output_uri"
         # and runs a normal inline query. This is correct behavior.
@@ -114,13 +126,16 @@ class TestOutputUriValidation:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 1",
-            "async": False,
-            "timeout": 30,
-            "output_uri": "file:///etc/passwd_backup.jsonl",
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 1",
+                "async": False,
+                "timeout": 30,
+                "output_uri": "file:///etc/passwd_backup.jsonl",
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, (
             f"Expected failure for system path, got: {payload}"
@@ -133,6 +148,7 @@ class TestOutputUriValidation:
 # ---------------------------------------------------------------------------
 # 2. execute_sql sync mode with output_uri (file streaming)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestExecuteSqlOutputUri:
@@ -148,13 +164,16 @@ class TestExecuteSqlOutputUri:
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
             output_uri = Path(tmpdir, "result.jsonl").as_uri()
-            r = real_tools.call("execute_sql", {
-                "project": project,
-                "sql": "SELECT 1 AS n, 'hello' AS msg",
-                "async": False,
-                "timeout": 60,
-                "output_uri": output_uri,
-            })
+            r = real_tools.call(
+                "execute_sql",
+                {
+                    "project": project,
+                    "sql": "SELECT 1 AS n, 'hello' AS msg",
+                    "async": False,
+                    "timeout": 60,
+                    "output_uri": output_uri,
+                },
+            )
             payload = _text_payload(r)
             assert payload.get("success") is True, (
                 f"execute_sql with output_uri failed: {payload}"
@@ -175,13 +194,13 @@ class TestExecuteSqlOutputUri:
 
             # Verify the JSONL file was created and contains valid JSON lines
             output_path = Path(payload["outputPath"])
-            assert output_path.exists(), (
-                f"Output file not created at {output_path}"
-            )
+            assert output_path.exists(), f"Output file not created at {output_path}"
             lines = output_path.read_text(encoding="utf-8").strip().splitlines()
             assert len(lines) >= 1, f"JSONL file is empty: {output_path}"
             first_row = json.loads(lines[0])
-            assert "n" in first_row, f"Expected 'n' column in JSONL row, got: {first_row}"
+            assert "n" in first_row, (
+                f"Expected 'n' column in JSONL row, got: {first_row}"
+            )
 
     def test_sync_output_uri_preview_rows(
         self, real_tools: Tools, real_config: Any
@@ -200,20 +219,27 @@ class TestExecuteSqlOutputUri:
             )
             # Fallback: simpler query that produces a few rows
             sql = "SELECT 1 AS id, 'val_1' AS val UNION ALL SELECT 2 AS id, 'val_2' AS val"
-            r = real_tools.call("execute_sql", {
-                "project": project,
-                "sql": sql,
-                "async": False,
-                "timeout": 60,
-                "output_uri": output_uri,
-            })
+            r = real_tools.call(
+                "execute_sql",
+                {
+                    "project": project,
+                    "sql": sql,
+                    "async": False,
+                    "timeout": 60,
+                    "output_uri": output_uri,
+                },
+            )
             payload = _text_payload(r)
             assert payload.get("success") is True, (
                 f"execute_sql with output_uri failed: {payload}"
             )
             preview = payload.get("preview") or []
-            assert isinstance(preview, list), f"preview must be a list, got: {type(preview)}"
-            assert len(preview) >= 1, f"preview should have at least 1 row, got: {preview}"
+            assert isinstance(preview, list), (
+                f"preview must be a list, got: {type(preview)}"
+            )
+            assert len(preview) >= 1, (
+                f"preview should have at least 1 row, got: {preview}"
+            )
             assert payload.get("previewRows", 0) == len(preview), (
                 f"previewRows mismatch: {payload.get('previewRows')} != {len(preview)}"
             )
@@ -222,6 +248,7 @@ class TestExecuteSqlOutputUri:
 # ---------------------------------------------------------------------------
 # 3. execute_sql async mode with output_uri (outputUriHint)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestAsyncOutputUriHint:
@@ -237,12 +264,15 @@ class TestAsyncOutputUriHint:
 
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
             output_uri = Path(tmpdir, "async_result.jsonl").as_uri()
-            r = real_tools.call("execute_sql", {
-                "project": project,
-                "sql": "SELECT 1 AS x",
-                "async": True,
-                "output_uri": output_uri,
-            })
+            r = real_tools.call(
+                "execute_sql",
+                {
+                    "project": project,
+                    "sql": "SELECT 1 AS x",
+                    "async": True,
+                    "output_uri": output_uri,
+                },
+            )
             payload = _text_payload(r)
             assert payload.get("success") is True, (
                 f"Async execute_sql failed: {payload}"
@@ -263,6 +293,7 @@ class TestAsyncOutputUriHint:
 # 4. get_instance with output_uri (streaming async results to file)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestGetInstanceOutputUri:
     """get_instance with output_uri: stream async results to JSONL file."""
@@ -281,11 +312,14 @@ class TestGetInstanceOutputUri:
             pytest.skip("default_project not configured")
 
         # Step 1: Submit async
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 42 AS answer, 'output_uri_test' AS label",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 42 AS answer, 'output_uri_test' AS label",
+                "async": True,
+            },
+        )
         sp = _text_payload(r)
         assert sp.get("success") is True, f"Async submit failed: {sp}"
         instance_id = sp["instanceId"]
@@ -296,11 +330,14 @@ class TestGetInstanceOutputUri:
         # Step 3: get_instance with output_uri
         with tempfile.TemporaryDirectory(prefix="mcp_e2e_") as tmpdir:
             output_uri = Path(tmpdir, "instance_result.jsonl").as_uri()
-            r3 = real_tools.call("get_instance", {
-                "project": project,
-                "instanceId": instance_id,
-                "output_uri": output_uri,
-            })
+            r3 = real_tools.call(
+                "get_instance",
+                {
+                    "project": project,
+                    "instanceId": instance_id,
+                    "output_uri": output_uri,
+                },
+            )
             gp = _text_payload(r3)
             assert "results" in gp, f"get_instance must return results, got: {gp}"
 
@@ -322,10 +359,14 @@ class TestGetInstanceOutputUri:
                         assert output_path.exists(), (
                             f"Output file not created at {output_path}"
                         )
-                        lines = output_path.read_text(encoding="utf-8").strip().splitlines()
+                        lines = (
+                            output_path.read_text(encoding="utf-8").strip().splitlines()
+                        )
                         assert len(lines) >= 1, f"JSONL file empty: {output_path}"
                         first = json.loads(lines[0])
-                        assert "answer" in first, f"Expected 'answer' column, got: {first}"
+                        assert "answer" in first, (
+                            f"Expected 'answer' column, got: {first}"
+                        )
                     elif "data" in task_entry or "error" not in task_entry:
                         found_result = True
                 elif isinstance(task_entry, str) and task_entry.strip():
@@ -346,11 +387,14 @@ class TestGetInstanceOutputUri:
             pytest.skip("default_project not configured")
 
         # Submit async
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SELECT 99 AS num",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SELECT 99 AS num",
+                "async": True,
+            },
+        )
         sp = _text_payload(r)
         assert sp.get("success") is True, f"Async submit failed: {sp}"
         instance_id = sp["instanceId"]
@@ -358,15 +402,18 @@ class TestGetInstanceOutputUri:
         _wait_for_instance(real_tools, project, instance_id, timeout=120)
 
         # get_instance without output_uri
-        r3 = real_tools.call("get_instance", {
-            "project": project,
-            "instanceId": instance_id,
-        })
+        r3 = real_tools.call(
+            "get_instance",
+            {
+                "project": project,
+                "instanceId": instance_id,
+            },
+        )
         gp = _text_payload(r3)
         assert "results" in gp, f"get_instance must return results, got: {gp}"
         # At least one task with data (structured dict or raw CSV string)
         found_data = False
-        for task_name, task_entry in gp["results"].items():
+        for task_entry in gp["results"].values():
             if isinstance(task_entry, dict) and "data" in task_entry:
                 found_data = True
                 assert isinstance(task_entry["data"], list), (
@@ -384,31 +431,32 @@ class TestGetInstanceOutputUri:
 # 5. SHOW / DESC raw output fallback
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _has_config(), reason="no config file for integration tests")
 class TestShowDescRawOutput:
     """SHOW and DESC statements must return raw output (not structured columns)."""
 
-    def test_show_tables_raw_output(
-        self, real_tools: Tools, real_config: Any
-    ) -> None:
+    def test_show_tables_raw_output(self, real_tools: Tools, real_config: Any) -> None:
         """SHOW TABLES must return rawOutput with a list of lines."""
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SHOW TABLES",
-            "async": False,
-            "timeout": 60,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SHOW TABLES",
+                "async": False,
+                "timeout": 60,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is True, (
             f"SHOW TABLES must succeed, got: {payload}"
         )
         # SHOW results use the raw-output fallback: either "rawOutput" or "data" with lines
         has_raw = "rawOutput" in payload or (
-            isinstance(payload.get("data"), list)
-            and payload.get("rowCount", 0) >= 0
+            isinstance(payload.get("data"), list) and payload.get("rowCount", 0) >= 0
         )
         assert has_raw, (
             f"SHOW TABLES must return rawOutput or data with rowCount, got keys: {list(payload.keys())}"
@@ -423,11 +471,14 @@ class TestShowDescRawOutput:
             pytest.skip("default_project not configured")
 
         # Step 1: Submit async
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SHOW TABLES",
-            "async": True,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SHOW TABLES",
+                "async": True,
+            },
+        )
         sp = _text_payload(r)
         assert sp.get("success") is True, f"Async SHOW TABLES failed: {sp}"
         instance_id = sp["instanceId"]
@@ -436,39 +487,45 @@ class TestShowDescRawOutput:
         _wait_for_instance(real_tools, project, instance_id, timeout=120)
 
         # Step 3: get_instance
-        r3 = real_tools.call("get_instance", {
-            "project": project,
-            "instanceId": instance_id,
-        })
+        r3 = real_tools.call(
+            "get_instance",
+            {
+                "project": project,
+                "instanceId": instance_id,
+            },
+        )
         gp = _text_payload(r3)
         assert "results" in gp, f"get_instance must return results, got: {gp}"
         # SHOW results: at least one task with data (may be raw string or dict)
         found_result = False
-        for task_name, task_entry in gp["results"].items():
-            if isinstance(task_entry, dict) and "error" not in task_entry:
-                found_result = True
-                break
-            elif isinstance(task_entry, str) and task_entry.strip():
+        for task_entry in gp["results"].values():
+            if (
+                isinstance(task_entry, dict)
+                and "error" not in task_entry
+                or isinstance(task_entry, str)
+                and task_entry.strip()
+            ):
                 found_result = True
                 break
         assert found_result, (
             f"Expected at least one task result from SHOW TABLES, got: {gp['results']}"
         )
 
-    def test_desc_table_raw_output(
-        self, real_tools: Tools, real_config: Any
-    ) -> None:
+    def test_desc_table_raw_output(self, real_tools: Tools, real_config: Any) -> None:
         """DESC on a known table must return raw output."""
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
         # Use information_schema.tables which exists in every project
-        r = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": "SHOW TABLES",
-            "async": False,
-            "timeout": 60,
-        })
+        r = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": "SHOW TABLES",
+                "async": False,
+                "timeout": 60,
+            },
+        )
         payload = _text_payload(r)
         if payload.get("success") is False:
             pytest.skip("SHOW TABLES not available in this environment")
@@ -483,12 +540,15 @@ class TestShowDescRawOutput:
         if not table_name:
             pytest.skip("Could not parse table name from SHOW TABLES output")
 
-        r2 = real_tools.call("execute_sql", {
-            "project": project,
-            "sql": f"DESC {table_name}",
-            "async": False,
-            "timeout": 60,
-        })
+        r2 = real_tools.call(
+            "execute_sql",
+            {
+                "project": project,
+                "sql": f"DESC {table_name}",
+                "async": False,
+                "timeout": 60,
+            },
+        )
         payload2 = _text_payload(r2)
         # DESC may or may not work depending on permissions, but it must not crash
         # and must return success=true or an error (not an exception)

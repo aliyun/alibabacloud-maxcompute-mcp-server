@@ -1,4 +1,5 @@
 """Unit tests for maxcompute_client.py."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -8,14 +9,12 @@ import pytest
 from maxcompute_catalog_mcp.config import (
     MaxComputeCatalogConfig,
     ResolvedEndpoints,
-    resolve_protocol_and_endpoints,
 )
 from maxcompute_catalog_mcp.maxcompute_client import (
     MaxComputeCatalogSdk,
     MaxComputeClient,
     _build_catalog_client,
 )
-
 
 # ---------------------------------------------------------------------------
 # _build_catalog_client()
@@ -37,7 +36,9 @@ class TestBuildCatalogClient:
     def test_fallback_static_ak(self, mock_api, mock_catalog) -> None:
         _build_catalog_client(
             "catalog.example.com",
-            access_key_id="AK", access_key_secret="SK", security_token="TOK",
+            access_key_id="AK",
+            access_key_secret="SK",
+            security_token="TOK",
         )
         config_call = mock_api.Config.call_args
         assert config_call.kwargs.get("access_key_id") == "AK"
@@ -70,12 +71,14 @@ class TestBuildCatalogClient:
     def test_fallback_on_type_error(self, mock_api, mock_catalog) -> None:
         """TypeError from Config → retry without credential/security_token."""
         call_count = 0
+
         def config_side_effect(**kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise TypeError("unexpected keyword")
             return MagicMock()
+
         mock_api.Config.side_effect = config_side_effect
         _build_catalog_client("ep.com", credential_client=MagicMock())
         assert call_count == 2
@@ -91,7 +94,8 @@ class TestMaxComputeCatalogSdk:
         cfg = MaxComputeCatalogConfig(
             catalogapi_endpoint="catalog.example.com",
             maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
+            access_key_id="AK",
+            access_key_secret="SK",
         )
         with pytest.raises(RuntimeError, match="credential_client is required"):
             MaxComputeCatalogSdk.create(cfg, credential_client=None)
@@ -102,7 +106,8 @@ class TestMaxComputeCatalogSdk:
         cfg = MaxComputeCatalogConfig(
             catalogapi_endpoint="catalog.example.com",
             maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
+            access_key_id="AK",
+            access_key_secret="SK",
         )
         sdk = MaxComputeCatalogSdk.create(cfg, credential_client=MagicMock())
         assert sdk.client is mock_build.return_value
@@ -113,7 +118,8 @@ class TestMaxComputeCatalogSdk:
         cfg = MaxComputeCatalogConfig(
             catalogapi_endpoint="catalog.example.com",
             maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
+            access_key_id="AK",
+            access_key_secret="SK",
         )
         resolved = ResolvedEndpoints(
             maxcompute_protocol="https",
@@ -121,7 +127,9 @@ class TestMaxComputeCatalogSdk:
             catalogapi_protocol="http",
             catalogapi_host="catalog.example.com",
         )
-        MaxComputeCatalogSdk.create(cfg, credential_client=MagicMock(), resolved=resolved)
+        MaxComputeCatalogSdk.create(
+            cfg, credential_client=MagicMock(), resolved=resolved
+        )
         # _build_catalog_client should be called with catalogapi_host and protocol
         call_args = mock_build.call_args
         assert call_args[0][0] == "catalog.example.com"
@@ -142,33 +150,46 @@ class TestMaxComputeClient:
     def test_create_no_odps(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """ODPS=None → returns None."""
         import maxcompute_catalog_mcp.maxcompute_client as mc_mod
+
         monkeypatch.setattr(mc_mod, "ODPS", None)
         cfg = MaxComputeCatalogConfig(
-            catalogapi_endpoint="", maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK", default_project="proj",
+            catalogapi_endpoint="",
+            maxcompute_endpoint="https://mc.example.com",
+            access_key_id="AK",
+            access_key_secret="SK",
+            default_project="proj",
         )
         assert MaxComputeClient.create(cfg, credential_client=MagicMock()) is None
 
     def test_create_no_project(self) -> None:
         """Empty default_project → returns None."""
         cfg = MaxComputeCatalogConfig(
-            catalogapi_endpoint="", maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK", default_project="",
+            catalogapi_endpoint="",
+            maxcompute_endpoint="https://mc.example.com",
+            access_key_id="AK",
+            access_key_secret="SK",
+            default_project="",
         )
         assert MaxComputeClient.create(cfg, credential_client=MagicMock()) is None
 
     def test_create_no_endpoint(self) -> None:
         """Empty maxcompute_endpoint with default_project → None (after strip)."""
         cfg = MaxComputeCatalogConfig(
-            catalogapi_endpoint="", maxcompute_endpoint="  ",
-            access_key_id="AK", access_key_secret="SK", default_project="proj",
+            catalogapi_endpoint="",
+            maxcompute_endpoint="  ",
+            access_key_id="AK",
+            access_key_secret="SK",
+            default_project="proj",
         )
         assert MaxComputeClient.create(cfg, credential_client=MagicMock()) is None
 
     def test_create_no_credential_client_raises(self) -> None:
         cfg = MaxComputeCatalogConfig(
-            catalogapi_endpoint="", maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK", default_project="proj",
+            catalogapi_endpoint="",
+            maxcompute_endpoint="https://mc.example.com",
+            access_key_id="AK",
+            access_key_secret="SK",
+            default_project="proj",
         )
         with pytest.raises(RuntimeError, match="credential_client is required"):
             MaxComputeClient.create(cfg, credential_client=None)
@@ -184,10 +205,13 @@ class TestMaxComputeClient:
         cfg = MaxComputeCatalogConfig(
             catalogapi_endpoint="",
             maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
+            access_key_id="AK",
+            access_key_secret="SK",
             default_project="proj",
         )
-        with pytest.raises(RuntimeError, match="CredentialProviderAccount not available"):
+        with pytest.raises(
+            RuntimeError, match="CredentialProviderAccount not available"
+        ):
             MaxComputeClient.create(cfg, credential_client=MagicMock())
 
     def test_create_success_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,7 +229,8 @@ class TestMaxComputeClient:
         cfg = MaxComputeCatalogConfig(
             catalogapi_endpoint="",
             maxcompute_endpoint="https://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
+            access_key_id="AK",
+            access_key_secret="SK",
             default_project="my_proj",
         )
         result = MaxComputeClient.create(cfg, credential_client=cred)
@@ -221,7 +246,9 @@ class TestMaxComputeClient:
         assert odps_call.kwargs["endpoint"] == "https://mc.example.com"
         assert odps_call.kwargs["rest_client_kwargs"] == {"user_agent": "ua-test/1.0"}
 
-    def test_create_with_resolved_endpoints(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_create_with_resolved_endpoints(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Explicit resolved endpoints override config-derived ones."""
         import maxcompute_catalog_mcp.maxcompute_client as mc_mod
 
@@ -235,7 +262,8 @@ class TestMaxComputeClient:
         cfg = MaxComputeCatalogConfig(
             catalogapi_endpoint="",
             maxcompute_endpoint="http://mc.example.com",
-            access_key_id="AK", access_key_secret="SK",
+            access_key_id="AK",
+            access_key_secret="SK",
             default_project="my_proj",
             protocol="https",
         )
@@ -245,7 +273,9 @@ class TestMaxComputeClient:
             catalogapi_protocol="https",
             catalogapi_host="catalog.example.com",
         )
-        result = MaxComputeClient.create(cfg, credential_client=MagicMock(), resolved=resolved)
+        result = MaxComputeClient.create(
+            cfg, credential_client=MagicMock(), resolved=resolved
+        )
         assert isinstance(result, MaxComputeClient)
         odps_call = mock_odps_cls.call_args
         # resolved.maxcompute_url should be used

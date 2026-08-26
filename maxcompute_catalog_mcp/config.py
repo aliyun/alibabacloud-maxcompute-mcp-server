@@ -28,19 +28,29 @@ Configuration methods (recommended for MCP):
      scheme is inferred per-client from the embedded scheme of each endpoint
      (catalogapi falls back to maxcompute scheme), defaulting to "https".
 """
+
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
+from urllib.parse import urlsplit
 
 from .tools_common import _env
 
 _ALLOWED_PROTOCOLS = ("", "http", "https")
 _ALLOWED_NETWORKS = ("", "public", "vpc")
 _REGION_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+_PUBLIC_MAXCOMPUTE_HOST = re.compile(
+    r"^service\.(?P<region>[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)"
+    r"\.maxcompute\.aliyun\.com$"
+)
+_VPC_MAXCOMPUTE_HOST = re.compile(
+    r"^service\.(?P<region>[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)"
+    r"(?:-intranet|-vpc)\.maxcompute\.aliyun-inc\.com$"
+)
 
 
 @dataclass(frozen=True)
@@ -51,23 +61,27 @@ class MaxComputeCatalogConfig:
     maxcompute_endpoint: str
     access_key_id: str = field(repr=False)
     access_key_secret: str = field(repr=False)
-    security_token: str = field(default="", repr=False)  # STS token; empty for non-STS auth
+    security_token: str = field(
+        default="", repr=False
+    )  # STS token; empty for non-STS auth
     default_project: str = ""
     namespace_id: str = ""  # main account UID for Catalog API namespaces/:search
     protocol: str = ""  # "" | "http" | "https"; empty means infer per-client
     region: str = ""  # Region for simple config or endpoint validation
     network: str = ""  # "" | "public" | "vpc"; simple-config network
-    description: str = ""  # display-only human note for named configs; not used for connection
+    description: str = (
+        ""  # display-only human note for named configs; not used for connection
+    )
 
 
 @dataclass(frozen=True)
 class ResolvedEndpoints:
     """Per-client protocol + normalised endpoint values derived from config."""
 
-    maxcompute_protocol: str   # "http" | "https"
-    maxcompute_url: str        # full URL including scheme
-    catalogapi_protocol: str   # "http" | "https"
-    catalogapi_host: str       # bare host (no scheme)
+    maxcompute_protocol: str  # "http" | "https"
+    maxcompute_url: str  # full URL including scheme
+    catalogapi_protocol: str  # "http" | "https"
+    catalogapi_host: str  # bare host (no scheme)
 
 
 def _resolve_simple_endpoints(
@@ -101,10 +115,29 @@ def _resolve_simple_endpoints(
             catalogapi_endpoint = catalogapi_endpoint or (
                 f"https://catalogapi.{region}-intranet.maxcompute.aliyun-inc.com"
             )
+    if not catalogapi_endpoint and maxcompute_endpoint:
+        catalogapi_endpoint = _catalogapi_endpoint_for_standard_fe(maxcompute_endpoint)
     return maxcompute_endpoint, catalogapi_endpoint
 
 
-def split_scheme(endpoint: str) -> Tuple[Optional[str], str]:
+def _catalogapi_endpoint_for_standard_fe(maxcompute_endpoint: str) -> str:
+    """Derive the CatalogAPI endpoint for a recognized standard FE endpoint."""
+
+    value = (maxcompute_endpoint or "").strip()
+    parsed = urlsplit(value if "://" in value else f"//{value}")
+    host = (parsed.hostname or "").lower()
+    public_match = _PUBLIC_MAXCOMPUTE_HOST.fullmatch(host)
+    if public_match is not None:
+        region = public_match.group("region")
+        return f"https://catalogapi.{region}.maxcompute.aliyun.com"
+    vpc_match = _VPC_MAXCOMPUTE_HOST.fullmatch(host)
+    if vpc_match is not None:
+        region = vpc_match.group("region")
+        return f"https://catalogapi.{region}-intranet.maxcompute.aliyun-inc.com"
+    return ""
+
+
+def split_scheme(endpoint: str) -> tuple[str | None, str]:
     """Split an endpoint into (scheme, host).
 
     Returns (scheme_lower, host_without_scheme) when a case-insensitive
@@ -115,7 +148,7 @@ def split_scheme(endpoint: str) -> Tuple[Optional[str], str]:
     low = s.lower()
     for prefix in ("https://", "http://"):
         if low.startswith(prefix):
-            return prefix[:-3], s[len(prefix):].strip()
+            return prefix[:-3], s[len(prefix) :].strip()
     return None, s
 
 
@@ -175,7 +208,8 @@ def resolve_catalogapi_endpoint_with_client(
         status = getattr(resp, "status_code", getattr(resp, "status", None))
         raise ValueError(f"Can't get catalog api server address: HTTP {status}")
 
-    body = (resp.text if hasattr(resp, "text") else resp.content.decode("utf-8")).strip()
+    body_value = resp.text if hasattr(resp, "text") else resp.content.decode("utf-8")
+    body = str(body_value).strip()
     if not body:
         raise ValueError("Can't get catalog api server address: empty response body")
     return body
@@ -189,7 +223,7 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
     client is created.
     """
     path = Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
-    conn: Dict[str, Any] = {}
+    conn: dict[str, Any] = {}
     if path.exists():
         cfg_json = json.loads(path.read_text(encoding="utf-8")) or {}
         conn = (cfg_json.get("maxcompute") or cfg_json.get("odps")) or {}
@@ -204,15 +238,23 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
         return (v or "").strip() if isinstance(v, str) else str(v or "")
 
     catalogapi_endpoint = pick(
-        "catalogapi_endpoint", "catalogapiEndpoint", "endpoint",
+        "catalogapi_endpoint",
+        "catalogapiEndpoint",
+        "endpoint",
         from_env="MAXCOMPUTE_CATALOG_API_ENDPOINT",
     )
     maxcompute_endpoint = pick(
-        "maxcompute_endpoint", "maxcomputeEndpoint", "sdkEndpoint",
+        "maxcompute_endpoint",
+        "maxcomputeEndpoint",
+        "sdkEndpoint",
         from_env="MAXCOMPUTE_ENDPOINT",
     )
-    default_project = pick("defaultProject", "default_project", from_env="MAXCOMPUTE_DEFAULT_PROJECT")
-    namespace_id = pick("namespaceId", "namespace_id", "account_uid", from_env="MAXCOMPUTE_NAMESPACE_ID")
+    default_project = pick(
+        "defaultProject", "default_project", from_env="MAXCOMPUTE_DEFAULT_PROJECT"
+    )
+    namespace_id = pick(
+        "namespaceId", "namespace_id", "account_uid", from_env="MAXCOMPUTE_NAMESPACE_ID"
+    )
     region = pick("region", from_env="MAXCOMPUTE_REGION")
     network = pick("network", from_env="MAXCOMPUTE_NETWORK").lower()
     maxcompute_endpoint, catalogapi_endpoint = _resolve_simple_endpoints(
@@ -225,14 +267,21 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
     protocol = protocol_raw.lower()
     if protocol not in _ALLOWED_PROTOCOLS:
         raise ValueError(
-            f"Invalid protocol value {protocol_raw!r}; allowed: "
-            f"{{'', 'http', 'https'}}"
+            f"Invalid protocol value {protocol_raw!r}; allowed: {{'', 'http', 'https'}}"
         )
 
     # resolve credentials
-    access_key_id = pick("accessKeyId", "access_key_id", from_env="ALIBABA_CLOUD_ACCESS_KEY_ID")
-    access_key_secret = pick("accessKeySecret", "access_key_secret", from_env="ALIBABA_CLOUD_ACCESS_KEY_SECRET")
-    security_token = pick("securityToken", "security_token", from_env="ALIBABA_CLOUD_SECURITY_TOKEN")
+    access_key_id = pick(
+        "accessKeyId", "access_key_id", from_env="ALIBABA_CLOUD_ACCESS_KEY_ID"
+    )
+    access_key_secret = pick(
+        "accessKeySecret",
+        "access_key_secret",
+        from_env="ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+    )
+    security_token = pick(
+        "securityToken", "security_token", from_env="ALIBABA_CLOUD_SECURITY_TOKEN"
+    )
     # Credential resolution is intentionally deferred to get_credentials_client() in build_tools().
     # Resolving here would snapshot dynamic credentials (credentials_uri / ECS RAM Role) at startup,
     # preventing the SDK from auto-refreshing tokens.
@@ -243,7 +292,9 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
         missing.append("maxcompute_endpoint (or env MAXCOMPUTE_ENDPOINT)")
     if missing:
         raise ValueError(
-            "Missing required MaxCompute config: " + ", ".join(missing) + f". Config file: {path.resolve()}"
+            "Missing required MaxCompute config: "
+            + ", ".join(missing)
+            + f". Config file: {path.resolve()}"
         )
 
     return MaxComputeCatalogConfig(
@@ -260,12 +311,13 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
     )
 
 
-def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
+def _config_from_bundle(conn: dict[str, Any]) -> MaxComputeCatalogConfig:
     """Parse one named-config bundle (dict-only, NO environment overrides).
 
     Used by load_configs() for each entry under the top-level "configs" object.
     Field-name variants mirror load_config(). description remains display-only.
     """
+
     def pick(*keys: str) -> str:
         for k in keys:
             v = conn.get(k)
@@ -274,7 +326,9 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
         return ""
 
     catalogapi_endpoint = pick("catalogapi_endpoint", "catalogapiEndpoint", "endpoint")
-    maxcompute_endpoint = pick("maxcompute_endpoint", "maxcomputeEndpoint", "sdkEndpoint")
+    maxcompute_endpoint = pick(
+        "maxcompute_endpoint", "maxcomputeEndpoint", "sdkEndpoint"
+    )
     region = pick("region")
     network = pick("network").lower()
     maxcompute_endpoint, catalogapi_endpoint = _resolve_simple_endpoints(
@@ -287,7 +341,9 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
         raise ValueError("missing required 'maxcompute_endpoint'")
     protocol = pick("protocol").lower()
     if protocol not in _ALLOWED_PROTOCOLS:
-        raise ValueError(f"invalid protocol value {protocol!r}; allowed: {{'', 'http', 'https'}}")
+        raise ValueError(
+            f"invalid protocol value {protocol!r}; allowed: {{'', 'http', 'https'}}"
+        )
 
     return MaxComputeCatalogConfig(
         catalogapi_endpoint=catalogapi_endpoint,
@@ -306,7 +362,7 @@ def _config_from_bundle(conn: Dict[str, Any]) -> MaxComputeCatalogConfig:
 
 def load_configs(
     config_path: str | None = None,
-) -> Tuple[Dict[str, MaxComputeCatalogConfig], str]:
+) -> tuple[dict[str, MaxComputeCatalogConfig], str]:
     """Load one-or-many named configs. Returns (configs_by_name, default_name).
 
     - If the JSON file has a top-level "configs" object: parse each named bundle
@@ -319,16 +375,16 @@ def load_configs(
     named "default".
     """
     path = Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
-    raw: Dict[str, Any] = {}
+    raw: dict[str, Any] = {}
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8")) or {}
 
     configs_obj = raw.get("configs")
     if isinstance(configs_obj, dict) and configs_obj:
-        configs: Dict[str, MaxComputeCatalogConfig] = {}
+        configs: dict[str, MaxComputeCatalogConfig] = {}
         for name, bundle in configs_obj.items():
             if not isinstance(bundle, dict):
-                raise ValueError(f"config {name!r} must be an object")
+                raise TypeError(f"config {name!r} must be an object")
             try:
                 configs[name] = _config_from_bundle(bundle)
             except ValueError as e:

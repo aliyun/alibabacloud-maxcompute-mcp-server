@@ -1,27 +1,35 @@
 """Unit tests for each MCP tool (mocked SDK/client)."""
+
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import os
 import pytest
 
 from maxcompute_catalog_mcp.tools import Tools
-from maxcompute_catalog_mcp.tools_compute import _is_denied_path, _DENIED_PREFIXES, _DENIED_PREFIXES_POSIX, _DENIED_PREFIXES_WINDOWS
+from maxcompute_catalog_mcp.tools_compute import (
+    _DENIED_PREFIXES,
+    _DENIED_PREFIXES_WINDOWS,
+    _is_denied_path,
+)
 
 # Import shared test helpers from conftest (pytest loads conftest automatically;
 # direct import works because tests/ is on sys.path during pytest collection)
-from tests.conftest import data as _data, text_payload as _text_payload
-
+from tests.conftest import data as _data
+from tests.conftest import text_payload as _text_payload
 
 # ---- Explorer ----
+
 
 def test_list_projects(tools: Tools) -> None:
     r = tools.call("list_projects", {"pageSize": 10})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     assert "projects" in data
     assert len(data["projects"]) >= 1
@@ -30,7 +38,9 @@ def test_list_projects(tools: Tools) -> None:
 def test_get_project(tools: Tools) -> None:
     r = tools.call("get_project", {"project": "p1"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     assert data.get("projectId") == "p1"
 
@@ -38,7 +48,10 @@ def test_get_project(tools: Tools) -> None:
 def test_get_project_missing_project_raises() -> None:
     from maxcompute_catalog_mcp.mcp_protocol import JsonRpcError
     from maxcompute_catalog_mcp.tools import Tools
-    t = Tools(sdk=MagicMock(), default_project="", namespace_id="", maxcompute_client=None)
+
+    t = Tools(
+        sdk=MagicMock(), default_project="", namespace_id="", maxcompute_client=None
+    )
     with pytest.raises(JsonRpcError):
         t.call("get_project", {})
 
@@ -46,7 +59,9 @@ def test_get_project_missing_project_raises() -> None:
 def test_list_schemas(tools: Tools) -> None:
     r = tools.call("list_schemas", {"project": "p1"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     assert "schemas" in data
 
@@ -54,7 +69,9 @@ def test_list_schemas(tools: Tools) -> None:
 def test_get_schema(tools: Tools) -> None:
     r = tools.call("get_schema", {"project": "p1", "schema": "default"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     assert data.get("schemaName") == "default"
 
@@ -62,15 +79,21 @@ def test_get_schema(tools: Tools) -> None:
 def test_list_tables(tools: Tools) -> None:
     r = tools.call("list_tables", {"project": "p1", "schema": "default"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     assert "tables" in data
 
 
 def test_get_table_schema(tools: Tools) -> None:
-    r = tools.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t1"})
+    r = tools.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     # _get_table_via_catalog always returns a "columns" list; the "raw" branch is dead
     assert "columns" in data
@@ -83,21 +106,28 @@ def test_get_partition_info(tools: Tools) -> None:
         {"project": "p1", "schema": "default", "table": "t1", "pageSize": 10},
     )
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     data = _data(payload)
     assert "partitions" in data
 
 
 # ---- Data query ----
 
+
 def test_cost_sql(tools: Tools) -> None:
     r = tools.call("cost_sql", {"project": "p1", "sql": "SELECT 1"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     assert "costEstimate" in payload
 
 
-def test_cost_sql_forwards_hints(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_cost_sql_forwards_hints(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """cost_sql must forward user-supplied hints to execute_sql_cost.
 
     Without this, 3-level (schema-enabled) projects fail to resolve tables
@@ -132,7 +162,9 @@ def test_execute_sql_max_cu_check_forwards_hints(
 def test_execute_sql(tools: Tools) -> None:
     r = tools.call("execute_sql", {"project": "p1", "sql": "SELECT 1"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     # Async mode (default): response must contain an instanceId
     assert "instanceId" in payload or "instanceId" in _data(payload)
 
@@ -144,7 +176,9 @@ def test_execute_sql_rejects_non_select(tools: Tools) -> None:
     assert "error" in payload
 
 
-def test_execute_sql_injects_readonly_hint(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_injects_readonly_hint(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """execute_sql must inject odps.sql.read.only=true in hints passed to run_sql."""
     tools.call("execute_sql", {"project": "p1", "sql": "SELECT 1"})
     mock_maxcompute_client.run_sql.assert_called_once()
@@ -155,13 +189,21 @@ def test_execute_sql_injects_readonly_hint(tools: Tools, mock_maxcompute_client:
     )
 
 
-def test_execute_sql_readonly_hint_not_overridable(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_readonly_hint_not_overridable(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """User-supplied hints must NOT be able to override odps.sql.read.only."""
-    tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "SELECT 1",
-        "hints": {"odps.sql.read.only": "false", "odps.sql.submit.mode": "interactive"},
-    })
+    tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "hints": {
+                "odps.sql.read.only": "false",
+                "odps.sql.submit.mode": "interactive",
+            },
+        },
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
     call_kwargs = mock_maxcompute_client.run_sql.call_args.kwargs
     hints = call_kwargs.get("hints", {})
@@ -174,13 +216,18 @@ def test_execute_sql_readonly_hint_not_overridable(tools: Tools, mock_maxcompute
     assert "odps.sql.submit.mode" in hints
 
 
-def test_execute_sql_readonly_hint_with_user_hints_merge(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_readonly_hint_with_user_hints_merge(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """User hints are merged with defaults, then readonly is enforced on top."""
-    tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "SELECT 1",
-        "hints": {"odps.sql.type.system.odps2": "true"},
-    })
+    tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "hints": {"odps.sql.type.system.odps2": "true"},
+        },
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
     call_kwargs = mock_maxcompute_client.run_sql.call_args.kwargs
     hints = call_kwargs.get("hints", {})
@@ -189,7 +236,9 @@ def test_execute_sql_readonly_hint_with_user_hints_merge(tools: Tools, mock_maxc
     assert hints.get("odps.sql.type.system.odps2") == "true"
 
 
-def test_cost_sql_does_not_inject_readonly_hint(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_cost_sql_does_not_inject_readonly_hint(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """cost_sql is estimation only and must NOT include odps.sql.read.only hint."""
     tools.call("cost_sql", {"project": "p1", "sql": "SELECT 1"})
     mock_maxcompute_client.execute_sql_cost.assert_called_once()
@@ -202,18 +251,25 @@ def test_cost_sql_does_not_inject_readonly_hint(tools: Tools, mock_maxcompute_cl
 
 def test_execute_sql_rejects_set_statement(tools: Tools) -> None:
     """SET statements must be rejected — they can override the server-side read-only hint."""
-    r = tools.call("execute_sql", {"project": "p1", "sql": "SET odps.sql.read.only=false"})
+    r = tools.call(
+        "execute_sql", {"project": "p1", "sql": "SET odps.sql.read.only=false"}
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
-    assert "SET" in payload.get("error", "") or "Only SELECT" in payload.get("error", "")
+    assert "SET" in payload.get("error", "") or "Only SELECT" in payload.get(
+        "error", ""
+    )
 
 
 def test_execute_sql_rejects_cte_insert(tools: Tools) -> None:
     """WITH ... INSERT must be rejected at client-side guard (CTE body DML detection)."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "WITH tmp AS (SELECT 1 AS id) INSERT INTO t SELECT id FROM tmp",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "WITH tmp AS (SELECT 1 AS id) INSERT INTO t SELECT id FROM tmp",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "INSERT" in payload.get("error", "").upper()
@@ -221,10 +277,13 @@ def test_execute_sql_rejects_cte_insert(tools: Tools) -> None:
 
 def test_execute_sql_rejects_cte_delete(tools: Tools) -> None:
     """WITH ... DELETE must be rejected at client-side guard."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "WITH tmp AS (SELECT 1 AS id) DELETE FROM t WHERE id IN (SELECT id FROM tmp)",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "WITH tmp AS (SELECT 1 AS id) DELETE FROM t WHERE id IN (SELECT id FROM tmp)",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "DELETE" in payload.get("error", "").upper()
@@ -232,10 +291,13 @@ def test_execute_sql_rejects_cte_delete(tools: Tools) -> None:
 
 def test_execute_sql_rejects_cte_update(tools: Tools) -> None:
     """WITH ... UPDATE must be rejected at client-side guard."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "WITH tmp AS (SELECT 1 AS id) UPDATE t SET val='x' WHERE id IN (SELECT id FROM tmp)",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "WITH tmp AS (SELECT 1 AS id) UPDATE t SET val='x' WHERE id IN (SELECT id FROM tmp)",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "UPDATE" in payload.get("error", "").upper()
@@ -243,10 +305,13 @@ def test_execute_sql_rejects_cte_update(tools: Tools) -> None:
 
 def test_execute_sql_rejects_cte_merge(tools: Tools) -> None:
     """WITH ... MERGE must be rejected at client-side guard."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "WITH src AS (SELECT 1 AS id, 'x' AS val) MERGE INTO t USING src ON t.id = src.id WHEN MATCHED THEN UPDATE SET val = src.val",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "WITH src AS (SELECT 1 AS id, 'x' AS val) MERGE INTO t USING src ON t.id = src.id WHEN MATCHED THEN UPDATE SET val = src.val",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     # The guard detects MERGE or UPDATE in the CTE body (either is valid)
@@ -256,89 +321,134 @@ def test_execute_sql_rejects_cte_merge(tools: Tools) -> None:
 
 def test_execute_sql_allows_cte_select(tools: Tools) -> None:
     """WITH ... SELECT must still be allowed."""
-    r = tools.call("execute_sql", {"project": "p1", "sql": "WITH tmp AS (SELECT 1 AS id) SELECT * FROM tmp"})
+    r = tools.call(
+        "execute_sql",
+        {"project": "p1", "sql": "WITH tmp AS (SELECT 1 AS id) SELECT * FROM tmp"},
+    )
     payload = _text_payload(r)
     assert payload.get("success") is True or "error" not in payload
 
 
 def test_execute_sql_allows_cte_select_with_dml_word_in_string(tools: Tools) -> None:
     """CTE with DML keyword inside a string literal must NOT be falsely rejected."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "WITH tmp AS (SELECT 'INSERT' AS action_type) SELECT * FROM tmp",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "WITH tmp AS (SELECT 'INSERT' AS action_type) SELECT * FROM tmp",
+        },
+    )
     payload = _text_payload(r)
     # Should NOT be rejected — 'INSERT' is inside a string literal
     assert payload.get("success") is True or "error" not in payload
 
 
-def test_execute_sql_allows_semicolon_in_string_literal(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_allows_semicolon_in_string_literal(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """SELECT with ';' inside a string literal must NOT be split into multiple statements."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "SELECT 'a;INSERT b' FROM t",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 'a;INSERT b' FROM t",
+        },
+    )
     payload = _text_payload(r)
     # Must not be rejected — the ';' is inside a string literal, not a statement separator
-    assert payload.get("success") is True, f"Unexpected rejection: {payload.get('error')}"
+    assert payload.get("success") is True, (
+        f"Unexpected rejection: {payload.get('error')}"
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
 
 
-def test_execute_sql_allows_backslash_escape_in_string(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_allows_backslash_escape_in_string(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Backslash-escaped single quote inside string must not leak DML keywords."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": r"SELECT 'it\'s INSERT demo' FROM t",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": r"SELECT 'it\'s INSERT demo' FROM t",
+        },
+    )
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"Unexpected rejection: {payload.get('error')}"
+    assert payload.get("success") is True, (
+        f"Unexpected rejection: {payload.get('error')}"
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
 
 
-def test_execute_sql_allows_double_quoted_dml_keyword_in_cte(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_allows_double_quoted_dml_keyword_in_cte(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Double-quoted string containing DML keyword in CTE must not trigger false-positive."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": 'WITH tmp AS (SELECT "INSERT" AS x) SELECT * FROM tmp',
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": 'WITH tmp AS (SELECT "INSERT" AS x) SELECT * FROM tmp',
+        },
+    )
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"Unexpected rejection: {payload.get('error')}"
+    assert payload.get("success") is True, (
+        f"Unexpected rejection: {payload.get('error')}"
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
 
 
-def test_execute_sql_allows_backtick_identifier_named_after_keyword(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_allows_backtick_identifier_named_after_keyword(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Backtick-escaped column named after a DML keyword should be allowed."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "WITH tmp AS (SELECT `insert` FROM t) SELECT * FROM tmp",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "WITH tmp AS (SELECT `insert` FROM t) SELECT * FROM tmp",
+        },
+    )
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"Unexpected rejection: {payload.get('error')}"
+    assert payload.get("success") is True, (
+        f"Unexpected rejection: {payload.get('error')}"
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
 
 
-def test_execute_sql_allows_string_with_line_comment_marker(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_allows_string_with_line_comment_marker(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """String literal containing '--' must not be mis-treated as a line comment."""
-    r = tools.call("execute_sql", {
-        "project": "p1",
-        "sql": "SELECT 'foo -- bar' AS s FROM t",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 'foo -- bar' AS s FROM t",
+        },
+    )
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"Unexpected rejection: {payload.get('error')}"
+    assert payload.get("success") is True, (
+        f"Unexpected rejection: {payload.get('error')}"
+    )
     mock_maxcompute_client.run_sql.assert_called_once()
 
 
 def test_get_instance_status(tools: Tools) -> None:
     r = tools.call("get_instance_status", {"project": "p1", "instanceId": "inst-001"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     assert "instanceId" in payload
 
 
 def test_get_instance(tools: Tools) -> None:
     r = tools.call("get_instance", {"project": "p1", "instanceId": "inst-001"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     assert "instanceId" in payload
     # conftest mock: is_terminated=True + is_successful=True → results branch
     assert "results" in payload
@@ -346,16 +456,21 @@ def test_get_instance(tools: Tools) -> None:
 
 # ---- Data insights ----
 
+
 def test_search_meta_data(tools: Tools) -> None:
     r = tools.call("search_meta_data", {"query": "test", "project": "p1"})
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     # Search result envelope must expose the entries list
     d = _data(payload)
     assert "entries" in d
 
 
-def test_search_meta_data_without_namespace_returns_unsupported(tools_no_namespace: Tools) -> None:
+def test_search_meta_data_without_namespace_returns_unsupported(
+    tools_no_namespace: Tools,
+) -> None:
     r = tools_no_namespace.call("search_meta_data", {"query": "test"})
     payload = _text_payload(r)
     assert payload.get("error") == "unsupported"
@@ -364,6 +479,7 @@ def test_search_meta_data_without_namespace_returns_unsupported(tools_no_namespa
 
 # ---- Table designer ----
 
+
 def test_create_table(tools: Tools) -> None:
     r = tools.call(
         "create_table",
@@ -371,15 +487,22 @@ def test_create_table(tools: Tools) -> None:
             "project": "p1",
             "schema": "default",
             "table": "test_t",
-            "columns": [{"name": "id", "type": "BIGINT"}, {"name": "name", "type": "STRING"}],
+            "columns": [
+                {"name": "id", "type": "BIGINT"},
+                {"name": "name", "type": "STRING"},
+            ],
         },
     )
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     assert payload.get("success") is True
 
 
-def test_create_table_without_compute_returns_unsupported(tools_no_compute: Tools) -> None:
+def test_create_table_without_compute_returns_unsupported(
+    tools_no_compute: Tools,
+) -> None:
     r = tools_no_compute.call(
         "create_table",
         {
@@ -404,18 +527,24 @@ def test_insert_values(tools: Tools) -> None:
         },
     )
     payload = _text_payload(r)
-    assert "error" not in payload, f"Expected success, should not contain error: {payload.get('error')}"
+    assert "error" not in payload, (
+        f"Expected success, should not contain error: {payload.get('error')}"
+    )
     assert payload.get("success") is True
 
 
 def test_insert_values_empty_columns_returns_error(tools: Tools) -> None:
-    r = tools.call("insert_values", {"project": "p1", "table": "t1", "columns": [], "values": []})
+    r = tools.call(
+        "insert_values", {"project": "p1", "table": "t1", "columns": [], "values": []}
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "error" in payload
 
 
-def test_insert_values_async_returns_instance_id(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_insert_values_async_returns_instance_id(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """async=True must return instanceId immediately without waiting."""
     r = tools.call(
         "insert_values",
@@ -436,7 +565,9 @@ def test_insert_values_async_returns_instance_id(tools: Tools, mock_maxcompute_c
     mock_maxcompute_client.run_sql.return_value.wait_for_success.assert_not_called()
 
 
-def test_insert_values_async_partition_returns_instance_ids(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_insert_values_async_partition_returns_instance_ids(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """async=True with partitioned table returns batches list (one per partition batch)."""
     r = tools.call(
         "insert_values",
@@ -469,11 +600,15 @@ def test_insert_values_async_partition_returns_instance_ids(tools: Tools, mock_m
     mock_maxcompute_client.run_sql.return_value.wait_for_success.assert_not_called()
 
 
-def test_insert_values_sync_timeout_returns_instance_id(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_insert_values_sync_timeout_returns_instance_id(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Sync mode: WaitTimeoutError → success=False, timeout=True, instanceId returned."""
     from odps.errors import WaitTimeoutError
 
-    mock_maxcompute_client.run_sql.return_value.wait_for_success.side_effect = WaitTimeoutError("timed out")
+    mock_maxcompute_client.run_sql.return_value.wait_for_success.side_effect = (
+        WaitTimeoutError("timed out")
+    )
     r = tools.call(
         "insert_values",
         {
@@ -491,11 +626,15 @@ def test_insert_values_sync_timeout_returns_instance_id(tools: Tools, mock_maxco
     assert "5s" in payload.get("message", "")
 
 
-def test_execute_sql_sync_timeout_returns_instance_id(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_sync_timeout_returns_instance_id(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Sync execute_sql: WaitTimeoutError → success=False, timeout=True, instanceId returned."""
     from odps.errors import WaitTimeoutError
 
-    mock_maxcompute_client.run_sql.return_value.wait_for_success.side_effect = WaitTimeoutError("timed out")
+    mock_maxcompute_client.run_sql.return_value.wait_for_success.side_effect = (
+        WaitTimeoutError("timed out")
+    )
     r = tools.call(
         "execute_sql",
         {"project": "p1", "sql": "SELECT 1", "async": False, "timeout": 5},
@@ -558,7 +697,9 @@ def test_insert_values_row_length_mismatch(tools: Tools) -> None:
     assert "length" in payload.get("error", "").lower()
 
 
-def test_insert_values_partition_batches_by_partition_key(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_insert_values_partition_batches_by_partition_key(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Partitioned table: groups by partition key, generates INSERT INTO ... PARTITION (...) (...) VALUES ..."""
     r = tools.call(
         "insert_values",
@@ -597,7 +738,13 @@ def test_insert_values_invalid_async_type_returns_error(tools: Tools) -> None:
     """async must be a boolean; passing an integer must fail with a clear error."""
     r = tools.call(
         "insert_values",
-        {"project": "p1", "table": "t1", "columns": ["a"], "values": [["v"]], "async": 1},
+        {
+            "project": "p1",
+            "table": "t1",
+            "columns": ["a"],
+            "values": [["v"]],
+            "async": 1,
+        },
     )
     payload = _text_payload(r)
     assert payload.get("success") is False
@@ -666,15 +813,20 @@ def test_insert_values_async_partition_partial_failure(
 
 # ---- Unknown tool ----
 
+
 def test_unknown_tool_raises() -> None:
     from maxcompute_catalog_mcp.mcp_protocol import JsonRpcError
     from maxcompute_catalog_mcp.tools import Tools
-    t = Tools(sdk=MagicMock(), default_project="", namespace_id="", maxcompute_client=None)
+
+    t = Tools(
+        sdk=MagicMock(), default_project="", namespace_id="", maxcompute_client=None
+    )
     with pytest.raises(JsonRpcError):
         t.call("no_such_tool", {})
 
 
 # ---- 2-level project detection via get_project.schemaEnabled ----
+
 
 def _make_two_level_sdk(project: str = "p2") -> MagicMock:
     """SDK where get_project returns schemaEnabled=false for the given project."""
@@ -770,7 +922,9 @@ def test_list_tables_two_level_calls_api_with_schema() -> None:
 def test_get_table_schema_two_level_calls_api_with_schema() -> None:
     """get_table_schema for 2-level project passes schema to API unchanged."""
     tools = Tools(sdk=_make_two_level_sdk(), default_project="p2", namespace_id="")
-    r = tools.call("get_table_schema", {"project": "p2", "schema": "default", "table": "t1"})
+    r = tools.call(
+        "get_table_schema", {"project": "p2", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     data = _data(payload)
     assert "columns" in data
@@ -781,7 +935,9 @@ def test_get_table_schema_two_level_calls_api_with_schema() -> None:
 def test_get_partition_info_two_level_omits_schema() -> None:
     """get_partition_info for 2-level projects passes 'default' schema_name (not empty string to avoid double-slash in URL)."""
     tools = Tools(sdk=_make_two_level_sdk(), default_project="p2", namespace_id="")
-    r = tools.call("get_partition_info", {"project": "p2", "schema": "default", "table": "t1"})
+    r = tools.call(
+        "get_partition_info", {"project": "p2", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     # get_partition_info returns mcp_text_result(m), so payload is the raw dict
     assert "partitions" in payload
@@ -792,6 +948,7 @@ def test_get_partition_info_two_level_omits_schema() -> None:
 def test_get_table_schema_no_empty_partition_keys() -> None:
     """_get_table_via_catalog must not emit empty-string partition keys."""
     from pyodps_catalog import models as catalog_models
+
     pd = catalog_models.PartitionDefinition()
     valid = catalog_models.PartitionedColumn()
     valid.field = "ds"
@@ -799,14 +956,18 @@ def test_get_table_schema_no_empty_partition_keys() -> None:
     pd.partitioned_columns = [valid, empty]
 
     t = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t1",
+        project_id="p1",
+        schema_name="default",
+        table_name="t1",
     )
     t.partition_definition = pd
 
     sdk = MagicMock()
     sdk.client.get_table.return_value = t
     tools = Tools(sdk=sdk, default_project="p1", namespace_id="")
-    r = tools.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t1"})
+    r = tools.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     data = _data(payload)
     partition_keys = data.get("partitionKeys", [])
@@ -828,7 +989,9 @@ def test_execute_sql_open_reader_exception_logged_not_swallowed(
 
     with caplog.at_level(logging.DEBUG, logger="maxcompute_catalog_mcp.tools_compute"):
         # async=False forces the sync path where open_reader is actually called
-        r = tools.call("execute_sql", {"project": "p1", "sql": "SHOW TABLES", "async": False})
+        r = tools.call(
+            "execute_sql", {"project": "p1", "sql": "SHOW TABLES", "async": False}
+        )
 
     payload = _text_payload(r)
     assert payload.get("success") is True
@@ -838,6 +1001,7 @@ def test_execute_sql_open_reader_exception_logged_not_swallowed(
 
 
 # ---- Row cap + output_uri (large-result safety) ----
+
 
 def _build_mock_reader(columns: list[str], row_count: int) -> MagicMock:
     """Create a MagicMock reader: context-manager + _schema.columns + iterable records.
@@ -867,7 +1031,9 @@ def test_execute_sql_sync_inline_truncates_large_result(
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=10)
 
-    r = tools.call("execute_sql", {"project": "p1", "sql": "SELECT c1 FROM t", "async": False})
+    r = tools.call(
+        "execute_sql", {"project": "p1", "sql": "SELECT c1 FROM t", "async": False}
+    )
     payload = _text_payload(r)
     assert payload.get("success") is True
     assert payload.get("truncated") is True
@@ -885,7 +1051,9 @@ def test_execute_sql_sync_inline_no_truncation_when_under_cap(
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=5)
 
-    r = tools.call("execute_sql", {"project": "p1", "sql": "SELECT c1 FROM t", "async": False})
+    r = tools.call(
+        "execute_sql", {"project": "p1", "sql": "SELECT c1 FROM t", "async": False}
+    )
     payload = _text_payload(r)
     assert payload.get("truncated") is False
     assert payload.get("rowCount") == 5
@@ -893,7 +1061,9 @@ def test_execute_sql_sync_inline_no_truncation_when_under_cap(
 
 
 def test_execute_sql_sync_with_output_uri_streams_to_file(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """outputPath is decorated with instanceId to avoid collisions across calls."""
     out = tmp_path / "result.jsonl"
@@ -902,10 +1072,15 @@ def test_execute_sql_sync_with_output_uri_streams_to_file(
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1", "c2"], row_count=30)
 
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT c1, c2 FROM t",
-        "async": False, "output_uri": out.as_uri(),
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT c1, c2 FROM t",
+            "async": False,
+            "output_uri": out.as_uri(),
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is True
     assert payload.get("truncated") is False  # everything went to disk
@@ -915,26 +1090,37 @@ def test_execute_sql_sync_with_output_uri_streams_to_file(
     assert expected.exists()
     assert not out.exists()  # original path unused; decorated path used instead
     import json as _json
+
     lines = expected.read_text().strip().split("\n")
     assert len(lines) == 30
     assert _json.loads(lines[0]) == {"c1": "c1_0", "c2": "c2_0"}
 
 
 def test_execute_sql_rejects_unsupported_output_uri_scheme(tools: Tools) -> None:
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1", "async": False,
-        "output_uri": "s3://bucket/key",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": False,
+            "output_uri": "s3://bucket/key",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "file://" in payload.get("error", "")
 
 
 def test_execute_sql_rejects_empty_output_uri(tools: Tools) -> None:
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1", "async": False,
-        "output_uri": "file://",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": False,
+            "output_uri": "file://",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "empty" in payload.get("error", "").lower()
@@ -944,26 +1130,40 @@ def test_execute_sql_rejects_empty_output_uri(tools: Tools) -> None:
 def test_execute_sql_rejects_system_path_output_uri(tools: Tools) -> None:
     """output_uri pointing to sensitive system directories must be rejected."""
     for uri in ("file:///etc/passwd", "/bin/output.jsonl", "file:///proc/self/maps"):
-        r = tools.call("execute_sql", {
-            "project": "p1", "sql": "SELECT 1", "async": False,
-            "output_uri": uri,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "project": "p1",
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": uri,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, f"Expected rejection for {uri}"
-        assert "restricted" in payload.get("error", "").lower(), f"Missing 'restricted' in error for {uri}"
+        assert "restricted" in payload.get("error", "").lower(), (
+            f"Missing 'restricted' in error for {uri}"
+        )
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX-specific denied paths")
 def test_execute_sql_rejects_private_etc_path(tools: Tools) -> None:
     """output_uri directly targeting /private/etc (macOS symlink target) must be rejected."""
     for uri in ("/private/etc/config", "file:///private/etc/hosts"):
-        r = tools.call("execute_sql", {
-            "project": "p1", "sql": "SELECT 1", "async": False,
-            "output_uri": uri,
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "project": "p1",
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": uri,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, f"Expected rejection for {uri}"
-        assert "restricted" in payload.get("error", "").lower(), f"Missing 'restricted' in error for {uri}"
+        assert "restricted" in payload.get("error", "").lower(), (
+            f"Missing 'restricted' in error for {uri}"
+        )
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX-specific symlink resolution")
@@ -977,41 +1177,64 @@ def test_execute_sql_rejects_symlink_resolved_denied_path() -> None:
     """
     from maxcompute_catalog_mcp.tools_compute import _resolve_output_uri
 
-    with patch.object(Path, "resolve", return_value=Path("/private/etc/evil_config")):
-        with pytest.raises(ValueError, match="restricted"):
-            _resolve_output_uri("/tmp/safe_output.jsonl", create_dir=False)
+    with (
+        patch.object(Path, "resolve", return_value=Path("/private/etc/evil_config")),
+        pytest.raises(ValueError, match="restricted"),
+    ):
+        _resolve_output_uri("/tmp/safe_output.jsonl", create_dir=False)
 
 
 def test_execute_sql_rejects_file_uri_non_local_authority(tools: Tools) -> None:
     """file:// URI with non-local authority (e.g. file://evilhost/path) must be rejected."""
-    for uri in ("file://evilhost/path/result.jsonl", "file://192.168.1.1/share/out.jsonl"):
-        r = tools.call("execute_sql", {
-            "project": "p1", "sql": "SELECT 1", "async": False,
-            "output_uri": uri,
-        })
+    for uri in (
+        "file://evilhost/path/result.jsonl",
+        "file://192.168.1.1/share/out.jsonl",
+    ):
+        r = tools.call(
+            "execute_sql",
+            {
+                "project": "p1",
+                "sql": "SELECT 1",
+                "async": False,
+                "output_uri": uri,
+            },
+        )
         payload = _text_payload(r)
         assert payload.get("success") is False, f"Expected rejection for {uri}"
-        assert "authority" in payload.get("error", "").lower(), f"Missing 'authority' in error for {uri}"
+        assert "authority" in payload.get("error", "").lower(), (
+            f"Missing 'authority' in error for {uri}"
+        )
 
 
-def test_execute_sql_accepts_file_uri_localhost(tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any) -> None:
+def test_execute_sql_accepts_file_uri_localhost(
+    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any
+) -> None:
     """file://localhost/path is accepted (case-insensitive)."""
     out = tmp_path / "local_out.jsonl"
     inst = mock_maxcompute_client.run_sql.return_value
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
 
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT c1 FROM t",
-        "async": False, "output_uri": "file://localhost" + Path(out).as_uri()[len("file://"):],
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT c1 FROM t",
+            "async": False,
+            "output_uri": "file://localhost" + Path(out).as_uri()[len("file://") :],
+        },
+    )
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"localhost authority should be accepted, got: {payload}"
+    assert payload.get("success") is True, (
+        f"localhost authority should be accepted, got: {payload}"
+    )
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX-specific dot-segment paths")
 def test_execute_sql_accepts_dot_segment_path_escaping_denied_prefix(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """A path like /etc/../home/user/out.jsonl must NOT be rejected — dot segments normalize away."""
     # Construct a path that lexically contains /etc but normalizes to a safe directory
@@ -1019,28 +1242,42 @@ def test_execute_sql_accepts_dot_segment_path_escaping_denied_prefix(
     inst = mock_maxcompute_client.run_sql.return_value
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1", "async": False,
-        "output_uri": dot_path,
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": False,
+            "output_uri": dot_path,
+        },
+    )
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"Dot-segment path should be accepted, got: {payload}"
+    assert payload.get("success") is True, (
+        f"Dot-segment path should be accepted, got: {payload}"
+    )
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX-specific dot-segment paths")
 def test_execute_sql_rejects_dot_segment_into_denied_prefix(tools: Tools) -> None:
     """A path like /tmp/../etc/passwd must be rejected after normalization."""
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1", "async": False,
-        "output_uri": "/tmp/../etc/passwd",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": False,
+            "output_uri": "/tmp/../etc/passwd",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "restricted" in payload.get("error", "").lower()
 
 
 def test_execute_sql_partial_file_pre_existing_rejected(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """If a .partial file already exists (simulating symlink attack), the write must fail."""
     out = tmp_path / "result.jsonl"
@@ -1051,41 +1288,63 @@ def test_execute_sql_partial_file_pre_existing_rejected(
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
 
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT c1 FROM t",
-        "async": False, "output_uri": out.as_uri(),
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT c1 FROM t",
+            "async": False,
+            "output_uri": out.as_uri(),
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
-    assert "partial" in payload.get("error", "").lower() or "already exists" in payload.get("error", "").lower()
+    assert (
+        "partial" in payload.get("error", "").lower()
+        or "already exists" in payload.get("error", "").lower()
+    )
 
 
 def test_execute_sql_partial_file_symlink_rejected(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """If .partial path is a symlink (O_NOFOLLOW triggers ELOOP), the write must fail."""
     import errno
+
     out = tmp_path / "result.jsonl"
     inst = mock_maxcompute_client.run_sql.return_value
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=1)
 
     # Simulate O_NOFOLLOW raising ELOOP by patching os.open
-    with patch("maxcompute_catalog_mcp.tools_compute.os.open", side_effect=OSError(errno.ELOOP, "Too many levels of symbolic links")):
-        r = tools.call("execute_sql", {
-            "project": "p1", "sql": "SELECT c1 FROM t",
-            "async": False, "output_uri": out.as_uri(),
-        })
+    with patch(
+        "maxcompute_catalog_mcp.tools_compute.os.open",
+        side_effect=OSError(errno.ELOOP, "Too many levels of symbolic links"),
+    ):
+        r = tools.call(
+            "execute_sql",
+            {
+                "project": "p1",
+                "sql": "SELECT c1 FROM t",
+                "async": False,
+                "output_uri": out.as_uri(),
+            },
+        )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "symlink" in payload.get("error", "").lower()
 
 
 def test_execute_sql_output_uri_works_without_onofollow(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """On platforms without O_NOFOLLOW (e.g. Windows), output_uri still works."""
     import maxcompute_catalog_mcp.tools_compute as tc_mod
+
     out = tmp_path / "no_follow.jsonl"
     inst = mock_maxcompute_client.run_sql.return_value
     inst.is_terminated.return_value = True
@@ -1098,19 +1357,28 @@ def test_execute_sql_output_uri_works_without_onofollow(
     try:
         if hasattr(tc_mod.os, "O_NOFOLLOW"):
             delattr(tc_mod.os, "O_NOFOLLOW")
-        r = tools.call("execute_sql", {
-            "project": "p1", "sql": "SELECT c1 FROM t",
-            "async": False, "output_uri": out.as_uri(),
-        })
+        r = tools.call(
+            "execute_sql",
+            {
+                "project": "p1",
+                "sql": "SELECT c1 FROM t",
+                "async": False,
+                "output_uri": out.as_uri(),
+            },
+        )
     finally:
         if original is not None:
             tc_mod.os.O_NOFOLLOW = original
     payload = _text_payload(r)
-    assert payload.get("success") is True, f"Should succeed without O_NOFOLLOW, got: {payload}"
+    assert payload.get("success") is True, (
+        f"Should succeed without O_NOFOLLOW, got: {payload}"
+    )
 
 
 def test_execute_sql_accepts_bare_path_output_uri(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """output_uri without scheme (bare path) is accepted as a local file path."""
     out = tmp_path / "bare.jsonl"
@@ -1119,10 +1387,15 @@ def test_execute_sql_accepts_bare_path_output_uri(
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_mock_reader(["c1"], row_count=3)
 
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT c1 FROM t",
-        "async": False, "output_uri": str(out),
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT c1 FROM t",
+            "async": False,
+            "output_uri": str(out),
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is True
     assert payload.get("outputPath") == str(expected)
@@ -1134,8 +1407,7 @@ def _build_failing_reader(columns: list[str], rows_before_fail: int) -> MagicMoc
     records = [{c: f"{c}_{i}" for c in columns} for i in range(rows_before_fail)]
 
     def _gen():
-        for r in records:
-            yield r
+        yield from records
         raise RuntimeError("simulated network failure mid-stream")
 
     schema = MagicMock()
@@ -1151,7 +1423,9 @@ def _build_failing_reader(columns: list[str], rows_before_fail: int) -> MagicMoc
 
 
 def test_execute_sql_partial_write_cleaned_up_on_reader_failure(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """Reader raises mid-stream → no file at final path, no .partial leftover."""
     out = tmp_path / "result.jsonl"
@@ -1161,10 +1435,15 @@ def test_execute_sql_partial_write_cleaned_up_on_reader_failure(
     inst.is_terminated.return_value = True
     inst.open_reader.return_value = _build_failing_reader(["c1"], rows_before_fail=5)
 
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT c1 FROM t",
-        "async": False, "output_uri": out.as_uri(),
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT c1 FROM t",
+            "async": False,
+            "output_uri": out.as_uri(),
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "simulated" in payload.get("error", "")
@@ -1173,7 +1452,9 @@ def test_execute_sql_partial_write_cleaned_up_on_reader_failure(
 
 
 def test_execute_sql_async_with_output_uri_does_not_create_parent_dir(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """Async mode must validate output_uri format but not mkdir — no file will be written."""
     deep = tmp_path / "never" / "created" / "here"
@@ -1182,10 +1463,15 @@ def test_execute_sql_async_with_output_uri_does_not_create_parent_dir(
     inst = mock_maxcompute_client.run_sql.return_value
     inst.is_terminated.return_value = True
 
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1",
-        "async": True, "output_uri": out.as_uri(),
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": True,
+            "output_uri": out.as_uri(),
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is True
     assert payload.get("status") == "submitted"
@@ -1194,17 +1480,24 @@ def test_execute_sql_async_with_output_uri_does_not_create_parent_dir(
 
 def test_execute_sql_async_still_rejects_bad_output_uri_scheme(tools: Tools) -> None:
     """Async mode should still do format/scheme validation (create_dir=False ≠ skip validation)."""
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1",
-        "async": True, "output_uri": "s3://bucket/key",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": True,
+            "output_uri": "s3://bucket/key",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "file://" in payload.get("error", "")
 
 
 def test_get_instance_caps_rows_and_reports_truncation(
-    tools: Tools, mock_maxcompute_client: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Async path: get_instance without output_uri must cap rows just like sync path."""
     monkeypatch.setenv("MAXC_RESULT_ROW_CAP", "2")
@@ -1224,22 +1517,30 @@ def test_get_instance_caps_rows_and_reports_truncation(
 
 
 def test_get_instance_with_output_uri_streams_all_rows(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """Single-task: outputPath = <stem>.<instanceId><suffix>."""
     out = tmp_path / "async_result.jsonl"
     expected = tmp_path / "async_result.inst-001.jsonl"
     task_result = MagicMock()
-    task_result.open_reader.return_value = _build_mock_reader(["c1", "c2"], row_count=50)
+    task_result.open_reader.return_value = _build_mock_reader(
+        ["c1", "c2"], row_count=50
+    )
     mock_maxcompute_client.get_instance.return_value.is_terminated.return_value = True
     mock_maxcompute_client.get_instance.return_value.get_task_results.return_value = {
         "AnonymousSQLTask": task_result,
     }
 
-    r = tools.call("get_instance", {
-        "project": "p1", "instanceId": "inst-001",
-        "output_uri": out.as_uri(),
-    })
+    r = tools.call(
+        "get_instance",
+        {
+            "project": "p1",
+            "instanceId": "inst-001",
+            "output_uri": out.as_uri(),
+        },
+    )
     payload = _text_payload(r)
     task_entry = payload["results"]["AnonymousSQLTask"]
     assert task_entry["rowCount"] == 50
@@ -1251,7 +1552,9 @@ def test_get_instance_with_output_uri_streams_all_rows(
 
 
 def test_get_instance_multi_task_disambiguates_with_instanceid_and_task_name(
-    tools: Tools, mock_maxcompute_client: MagicMock, tmp_path: Any,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
+    tmp_path: Any,
 ) -> None:
     """Multi-task: each task writes to <stem>.<instanceId>.<task_name><suffix>."""
     out = tmp_path / "bundle.jsonl"
@@ -1265,10 +1568,14 @@ def test_get_instance_multi_task_disambiguates_with_instanceid_and_task_name(
         "TaskB": task_b,
     }
 
-    r = tools.call("get_instance", {
-        "project": "p1", "instanceId": "inst-001",
-        "output_uri": out.as_uri(),
-    })
+    r = tools.call(
+        "get_instance",
+        {
+            "project": "p1",
+            "instanceId": "inst-001",
+            "output_uri": out.as_uri(),
+        },
+    )
     payload = _text_payload(r)
     a_path = tmp_path / "bundle.inst-001.TaskA.jsonl"
     b_path = tmp_path / "bundle.inst-001.TaskB.jsonl"
@@ -1280,7 +1587,8 @@ def test_get_instance_multi_task_disambiguates_with_instanceid_and_task_name(
 
 
 def test_get_instance_reports_error_when_schema_missing(
-    tools: Tools, mock_maxcompute_client: MagicMock,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """Reader without _schema attribute → task entry carries an error, not empty-dict rows."""
     task_result = MagicMock()
@@ -1306,7 +1614,8 @@ def test_get_instance_reports_error_when_schema_missing(
 
 
 def test_get_instance_reports_error_when_columns_empty(
-    tools: Tools, mock_maxcompute_client: MagicMock,
+    tools: Tools,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """Reader with _schema.columns == [] → error, not empty-dict rows."""
     task_result = MagicMock()
@@ -1332,6 +1641,7 @@ def test_get_instance_reports_error_when_columns_empty(
 
 # ---- Table metadata (comment / labels / columns / expiration) ----
 
+
 def _make_table_model(
     *,
     description: str = "old desc",
@@ -1341,6 +1651,7 @@ def _make_table_model(
 ) -> Any:
     """Build a real pyodps_catalog Table model for get_table/update_table mocks."""
     from pyodps_catalog import models as catalog_models
+
     t = catalog_models.Table(
         project_id="p1",
         schema_name="default",
@@ -1360,8 +1671,11 @@ def _make_table_model(
                 "mode": "NULLABLE",
                 "description": "address",
                 "children": [
-                    {"field_name": "city", "sql_type_definition": "STRING",
-                     "description": "city old"},
+                    {
+                        "field_name": "city",
+                        "sql_type_definition": "STRING",
+                        "description": "city old",
+                    },
                 ],
             },
         ]
@@ -1374,11 +1688,13 @@ def _make_table_model(
         )
         children = []
         for cf in f.get("children", []) or []:
-            children.append(catalog_models.TableFieldSchema(
-                field_name=cf["field_name"],
-                sql_type_definition=cf["sql_type_definition"],
-                description=cf.get("description") or "",
-            ))
+            children.append(
+                catalog_models.TableFieldSchema(
+                    field_name=cf["field_name"],
+                    sql_type_definition=cf["sql_type_definition"],
+                    description=cf.get("description") or "",
+                )
+            )
         sub.fields = children
         schema.fields.append(sub)
     t.table_schema = schema
@@ -1404,7 +1720,9 @@ def meta_tools(mock_sdk: MagicMock, mock_maxcompute_client: MagicMock) -> Tools:
 
 def test_get_table_schema_full_metadata(meta_tools: Tools) -> None:
     """get_table_schema should return SQL view + compact business-semantic metadata."""
-    r = meta_tools.call("get_table_schema", {"project": "p1", "schema": "default", "table": "t1"})
+    r = meta_tools.call(
+        "get_table_schema", {"project": "p1", "schema": "default", "table": "t1"}
+    )
     payload = _text_payload(r)
     assert "error" not in payload, payload
     data = _data(payload)
@@ -1423,7 +1741,9 @@ def test_get_table_schema_full_metadata(meta_tools: Tools) -> None:
     assert data["expiration"] == {}
 
     # columns now carries mode + nested struct children inline (no separate 'fields')
-    assert "fields" not in data, "duplicated top-level fields[] should be merged into columns[]"
+    assert "fields" not in data, (
+        "duplicated top-level fields[] should be merged into columns[]"
+    )
     assert "clustering" not in data
     assert "tableConstraints" not in data
     assert "tableFormatDefinition" not in data
@@ -1435,13 +1755,16 @@ def test_get_table_schema_full_metadata(meta_tools: Tools) -> None:
 
 
 def test_update_table_description_and_labels_merge(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1",
-        "schema": "default",
-        "table": "t1",
-        "description": "new desc",
-        "labels": {"set": {"owner": "alice"}},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "new desc",
+            "labels": {"set": {"owner": "alice"}},
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is True, payload
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
@@ -1451,30 +1774,45 @@ def test_update_table_description_and_labels_merge(meta_tools: Tools) -> None:
 
 
 def test_update_table_labels_replace(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "labels": {"set": {"owner": "alice"}, "mode": "replace"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "labels": {"set": {"owner": "alice"}, "mode": "replace"},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     assert sent.labels == {"owner": "alice"}
 
 
 def test_update_table_labels_delete(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "labels": {"set": {"env": "ignored"}, "mode": "delete"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "labels": {"set": {"env": "ignored"}, "mode": "delete"},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     assert sent.labels == {}
 
 
 def test_update_table_column_description_nested(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setComments": {"id": "primary id", "addr.city": "city name"}},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setComments": {"id": "primary id", "addr.city": "city name"}},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     id_field = next(f for f in sent.table_schema.fields if f.field_name == "id")
@@ -1485,10 +1823,15 @@ def test_update_table_column_description_nested(meta_tools: Tools) -> None:
 
 
 def test_update_table_set_nullable(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setNullable": ["id"]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setNullable": ["id"]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     id_field = next(f for f in sent.table_schema.fields if f.field_name == "id")
@@ -1496,10 +1839,15 @@ def test_update_table_set_nullable(meta_tools: Tools) -> None:
 
 
 def test_update_table_set_nullable_rejects_nested(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setNullable": ["addr.city"]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setNullable": ["addr.city"]},
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "nested" in payload["error"].lower()
@@ -1507,10 +1855,17 @@ def test_update_table_set_nullable_rejects_nested(meta_tools: Tools) -> None:
 
 
 def test_update_table_add_columns(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "age", "type": "BIGINT", "description": "years"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [{"name": "age", "type": "BIGINT", "description": "years"}]
+            },
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     names = [f.field_name for f in sent.table_schema.fields]
@@ -1526,20 +1881,30 @@ def test_update_table_add_columns(meta_tools: Tools) -> None:
 
 
 def test_update_table_add_columns_rejects_duplicate(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "id", "type": "BIGINT"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "id", "type": "BIGINT"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "already exists" in payload["error"]
 
 
 def test_update_table_expiration(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "expiration": {"days": 7, "partitionDays": 3},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "expiration": {"days": 7, "partitionDays": 3},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     assert sent.expiration_options.expiration_days == 7
@@ -1547,10 +1912,15 @@ def test_update_table_expiration(meta_tools: Tools) -> None:
 
 
 def test_update_table_expiration_rejects_negative(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "expiration": {"days": -1},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "expiration": {"days": -1},
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert ">=" in payload["error"] or "0" in payload["error"]
@@ -1558,9 +1928,14 @@ def test_update_table_expiration_rejects_negative(meta_tools: Tools) -> None:
 
 
 def test_update_table_no_fields_errors(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     # No get_table / update_table should happen when the plan is empty.
@@ -1568,10 +1943,15 @@ def test_update_table_no_fields_errors(meta_tools: Tools) -> None:
 
 
 def test_update_table_description_null_rejected(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": None,
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": None,
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "null" in payload["error"].lower()
@@ -1579,10 +1959,15 @@ def test_update_table_description_null_rejected(meta_tools: Tools) -> None:
 
 
 def test_update_table_uses_latest_etag(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": "new",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "new",
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     # etag copied from the get_table response, not supplied by caller
@@ -1590,11 +1975,16 @@ def test_update_table_uses_latest_etag(meta_tools: Tools) -> None:
 
 
 def test_update_table_etag_override(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": "new",
-        "etag": "forced-etag",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "new",
+            "etag": "forced-etag",
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     assert sent.etag == "forced-etag"
@@ -1608,13 +1998,18 @@ def test_update_table_add_and_set_comment_same_request(meta_tools: Tools) -> Non
     column was present in the same request.
     Fix: add is now executed first.
     """
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {
-            "add": [{"name": "age", "type": "BIGINT"}],
-            "setComments": {"age": "用户年龄"},
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [{"name": "age", "type": "BIGINT"}],
+                "setComments": {"age": "用户年龄"},
+            },
         },
-    })
+    )
     payload = _text_payload(r)
     assert payload["success"] is True, (
         f"add+setComments for new column should succeed, got: {payload.get('error')}"
@@ -1631,13 +2026,18 @@ def test_update_table_add_and_set_nullable_same_request(meta_tools: Tools) -> No
     New columns are NULLABLE by default, but setNullable on a just-added column
     should not fail — add runs before setNullable.
     """
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {
-            "add": [{"name": "score", "type": "DOUBLE"}],
-            "setNullable": ["score"],
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [{"name": "score", "type": "DOUBLE"}],
+                "setNullable": ["score"],
+            },
         },
-    })
+    )
     payload = _text_payload(r)
     assert payload["success"] is True, (
         f"add+setNullable for new column should succeed, got: {payload.get('error')}"
@@ -1647,12 +2047,19 @@ def test_update_table_add_and_set_nullable_same_request(meta_tools: Tools) -> No
     assert score.mode == "NULLABLE"
 
 
-def test_update_table_set_comment_unknown_column_still_errors(meta_tools: Tools) -> None:
+def test_update_table_set_comment_unknown_column_still_errors(
+    meta_tools: Tools,
+) -> None:
     """setComments for a column that truly doesn't exist must still fail."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setComments": {"ghost": "desc"}},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setComments": {"ghost": "desc"}},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "ghost" in payload["error"]
@@ -1660,10 +2067,15 @@ def test_update_table_set_comment_unknown_column_still_errors(meta_tools: Tools)
 
 
 def test_update_table_missing_column_errors(meta_tools: Tools) -> None:
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setComments": {"nope": "x"}},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setComments": {"nope": "x"}},
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "nope" in payload["error"]
@@ -1672,10 +2084,15 @@ def test_update_table_missing_column_errors(meta_tools: Tools) -> None:
 
 def test_update_table_response_includes_context_fields(meta_tools: Tools) -> None:
     """update_table response data must contain project/schema/table/updatedFields."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": "new",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "new",
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is True
     data = payload["data"]
@@ -1690,10 +2107,15 @@ def test_update_table_response_includes_context_fields(meta_tools: Tools) -> Non
 
 def test_update_table_add_column_without_description(meta_tools: Tools) -> None:
     """columns.add without description -> SDK receives None (field omitted on serialization)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "score", "type": "DOUBLE"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "score", "type": "DOUBLE"}]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     score = next(f for f in sent.table_schema.fields if f.field_name == "score")
@@ -1712,16 +2134,22 @@ def test_update_table_add_column_without_description(meta_tools: Tools) -> None:
 def test_find_field_by_path_empty_path() -> None:
     """_find_field_by_path returns None for empty path."""
     from maxcompute_catalog_mcp.tools_table_meta import _find_field_by_path
+
     assert _find_field_by_path([], []) is None
 
 
 def test_update_table_get_table_fails(meta_tools: Tools) -> None:
     """get_table raises exception → error response (L181-183)."""
     meta_tools.sdk.client.get_table.side_effect = RuntimeError("table not found")
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": "new",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "new",
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "Failed to fetch current table state" in payload["error"]
@@ -1730,10 +2158,15 @@ def test_update_table_get_table_fails(meta_tools: Tools) -> None:
 def test_update_table_sdk_update_fails(meta_tools: Tools) -> None:
     """sdk.client.update_table raises exception → error response (L198-200)."""
     meta_tools.sdk.client.update_table.side_effect = RuntimeError("server error")
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": "new",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "new",
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "server error" in payload["error"]
@@ -1741,10 +2174,15 @@ def test_update_table_sdk_update_fails(meta_tools: Tools) -> None:
 
 def test_update_table_description_not_string(meta_tools: Tools) -> None:
     """description is not a string → ValueError (L234)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": 123,
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": 123,
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "must be a string" in payload["error"]
@@ -1752,10 +2190,15 @@ def test_update_table_description_not_string(meta_tools: Tools) -> None:
 
 def test_update_table_labels_not_dict(meta_tools: Tools) -> None:
     """labels is not a dict → ValueError (L240)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "labels": "invalid",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "labels": "invalid",
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "labels must be an object" in payload["error"]
@@ -1763,10 +2206,15 @@ def test_update_table_labels_not_dict(meta_tools: Tools) -> None:
 
 def test_update_table_labels_set_not_dict(meta_tools: Tools) -> None:
     """labels.set is not a dict → ValueError (L246)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "labels": {"set": "invalid"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "labels": {"set": "invalid"},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "labels.set must be an object" in payload["error"]
@@ -1774,10 +2222,15 @@ def test_update_table_labels_set_not_dict(meta_tools: Tools) -> None:
 
 def test_update_table_labels_invalid_mode(meta_tools: Tools) -> None:
     """labels.mode is invalid → ValueError (L248)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "labels": {"set": {"k": "v"}, "mode": "upsert"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "labels": {"set": {"k": "v"}, "mode": "upsert"},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "labels.mode must be one of" in payload["error"]
@@ -1785,10 +2238,15 @@ def test_update_table_labels_invalid_mode(meta_tools: Tools) -> None:
 
 def test_update_table_expiration_not_dict(meta_tools: Tools) -> None:
     """expiration is not a dict → ValueError (L259)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "expiration": "invalid",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "expiration": "invalid",
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "expiration must be an object" in payload["error"]
@@ -1796,10 +2254,15 @@ def test_update_table_expiration_not_dict(meta_tools: Tools) -> None:
 
 def test_update_table_expiration_non_integer(meta_tools: Tools) -> None:
     """expiration.days is not an integer → ValueError (L263)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "expiration": {"days": "abc"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "expiration": {"days": "abc"},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "expiration.days must be an integer" in payload["error"]
@@ -1807,10 +2270,15 @@ def test_update_table_expiration_non_integer(meta_tools: Tools) -> None:
 
 def test_update_table_expiration_partition_days_negative(meta_tools: Tools) -> None:
     """expiration.partitionDays is negative → ValueError (L266-267)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "expiration": {"partitionDays": -5},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "expiration": {"partitionDays": -5},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert ">=" in payload["error"]
@@ -1818,10 +2286,15 @@ def test_update_table_expiration_partition_days_negative(meta_tools: Tools) -> N
 
 def test_update_table_columns_not_dict(meta_tools: Tools) -> None:
     """columns is not a dict → ValueError (L279)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": "invalid",
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": "invalid",
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "columns must be an object" in payload["error"]
@@ -1829,10 +2302,15 @@ def test_update_table_columns_not_dict(meta_tools: Tools) -> None:
 
 def test_update_table_set_comments_not_dict(meta_tools: Tools) -> None:
     """columns.setComments is not a dict → ValueError (L287)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setComments": "invalid"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setComments": "invalid"},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "columns.setComments must be an object" in payload["error"]
@@ -1840,10 +2318,15 @@ def test_update_table_set_comments_not_dict(meta_tools: Tools) -> None:
 
 def test_update_table_set_nullable_not_list(meta_tools: Tools) -> None:
     """columns.setNullable is not a list → ValueError (L295)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setNullable": "invalid"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setNullable": "invalid"},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "columns.setNullable must be an array" in payload["error"]
@@ -1851,10 +2334,15 @@ def test_update_table_set_nullable_not_list(meta_tools: Tools) -> None:
 
 def test_update_table_columns_add_not_list(meta_tools: Tools) -> None:
     """columns.add is not a list → ValueError (L307)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": "invalid"},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": "invalid"},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "columns.add must be an array" in payload["error"]
@@ -1862,10 +2350,15 @@ def test_update_table_columns_add_not_list(meta_tools: Tools) -> None:
 
 def test_update_table_columns_add_item_not_dict(meta_tools: Tools) -> None:
     """columns.add[i] is not a dict → ValueError (L311)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": ["not_a_dict"]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": ["not_a_dict"]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "must be an object" in payload["error"]
@@ -1873,10 +2366,15 @@ def test_update_table_columns_add_item_not_dict(meta_tools: Tools) -> None:
 
 def test_update_table_columns_add_missing_name(meta_tools: Tools) -> None:
     """columns.add[i] missing 'name' → ValueError (L313)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"type": "BIGINT"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"type": "BIGINT"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "missing 'name'" in payload["error"]
@@ -1884,10 +2382,15 @@ def test_update_table_columns_add_missing_name(meta_tools: Tools) -> None:
 
 def test_update_table_columns_add_missing_type(meta_tools: Tools) -> None:
     """columns.add[i] missing 'type' → ValueError (L315)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "col"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "col"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "missing 'type'" in payload["error"]
@@ -1895,10 +2398,15 @@ def test_update_table_columns_add_missing_type(meta_tools: Tools) -> None:
 
 def test_update_table_set_nullable_column_not_found(meta_tools: Tools) -> None:
     """setNullable for non-existent column → ValueError (L377)."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"setNullable": ["nonexistent_col"]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"setNullable": ["nonexistent_col"]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "not found" in payload["error"]
@@ -1907,16 +2415,24 @@ def test_update_table_set_nullable_column_not_found(meta_tools: Tools) -> None:
 def test_update_table_ensure_fields_schema_none(meta_tools: Tools) -> None:
     """Table with table_schema=None → _ensure_fields creates schema (L415)."""
     from pyodps_catalog import models as catalog_models
+
     # Build a table model with no table_schema
     current = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t1",
+        project_id="p1",
+        schema_name="default",
+        table_name="t1",
     )
     assert current.table_schema is None
     meta_tools.sdk.client.get_table.return_value = current
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "newcol", "type": "STRING"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "newcol", "type": "STRING"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is True
 
@@ -1924,17 +2440,25 @@ def test_update_table_ensure_fields_schema_none(meta_tools: Tools) -> None:
 def test_update_table_ensure_fields_fields_none(meta_tools: Tools) -> None:
     """Table with table_schema.fields=None → _ensure_fields creates list (L417)."""
     from pyodps_catalog import models as catalog_models
+
     current = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t1",
+        project_id="p1",
+        schema_name="default",
+        table_name="t1",
     )
     schema = catalog_models.TableFieldSchema()
     schema.fields = None
     current.table_schema = schema
     meta_tools.sdk.client.get_table.return_value = current
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "newcol", "type": "STRING"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "newcol", "type": "STRING"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is True
 
@@ -1948,15 +2472,22 @@ def test_update_table_add_columns_type_category_parametrized(meta_tools: Tools) 
     type_category was never set, causing 400 errors in production when callers
     added DECIMAL, VARCHAR, or ARRAY columns.
     """
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [
-            {"name": "price",  "type": "DECIMAL(10,2)"},
-            {"name": "tag",    "type": "VARCHAR(255)"},
-            {"name": "items",  "type": "ARRAY<STRING>"},
-            {"name": "kv",     "type": "MAP<STRING,BIGINT>"},
-        ]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [
+                    {"name": "price", "type": "DECIMAL(10,2)"},
+                    {"name": "tag", "type": "VARCHAR(255)"},
+                    {"name": "items", "type": "ARRAY<STRING>"},
+                    {"name": "kv", "type": "MAP<STRING,BIGINT>"},
+                ]
+            },
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     fields = {f.field_name: f for f in sent.table_schema.fields}
@@ -1979,25 +2510,40 @@ def test_update_table_add_columns_type_category_parametrized(meta_tools: Tools) 
 # Unit tests for _parse_sql_type parser
 # ---------------------------------------------------------------------------
 
+
 class TestParseSqlType:
     """Unit tests for the module-level _parse_sql_type() parser."""
 
     @pytest.fixture(autouse=True)
     def _import(self):
         from maxcompute_catalog_mcp.tools_table_meta import _parse_sql_type
+
         self.parse = _parse_sql_type
 
     # -- simple types --
 
-    @pytest.mark.parametrize("type_str", [
-        "BIGINT", "INT", "TINYINT", "SMALLINT",
-        "FLOAT", "DOUBLE",
-        "BOOLEAN",
-        "STRING", "BINARY",
-        "DATE", "DATETIME", "TIMESTAMP", "TIMESTAMP_NTZ",
-        "JSON", "BLOB",
-        "INTERVAL_DAY_TIME", "INTERVAL_YEAR_MONTH",
-    ])
+    @pytest.mark.parametrize(
+        "type_str",
+        [
+            "BIGINT",
+            "INT",
+            "TINYINT",
+            "SMALLINT",
+            "FLOAT",
+            "DOUBLE",
+            "BOOLEAN",
+            "STRING",
+            "BINARY",
+            "DATE",
+            "DATETIME",
+            "TIMESTAMP",
+            "TIMESTAMP_NTZ",
+            "JSON",
+            "BLOB",
+            "INTERVAL_DAY_TIME",
+            "INTERVAL_YEAR_MONTH",
+        ],
+    )
     def test_simple_types(self, type_str):
         f = self.parse(type_str)
         assert f.type_category == type_str
@@ -2192,17 +2738,25 @@ class TestParseSqlType:
     def test_nesting_depth_at_exact_limit(self):
         """Nesting at exactly _MAX_TYPE_NESTING_DEPTH complex-type layers must succeed."""
         from maxcompute_catalog_mcp.tools_table_meta import _MAX_TYPE_NESTING_DEPTH
+
         # Guard is _depth > _MAX_TYPE_NESTING_DEPTH, so depth == _MAX_TYPE_NESTING_DEPTH
         # is still allowed.  _MAX_TYPE_NESTING_DEPTH ARRAY wrappings drive the
         # innermost _parse_sql_type call to _depth == _MAX_TYPE_NESTING_DEPTH.
-        type_str = "ARRAY<" * _MAX_TYPE_NESTING_DEPTH + "INT" + ">" * _MAX_TYPE_NESTING_DEPTH
+        type_str = (
+            "ARRAY<" * _MAX_TYPE_NESTING_DEPTH + "INT" + ">" * _MAX_TYPE_NESTING_DEPTH
+        )
         f = self.parse(type_str)
         assert f.type_category == "ARRAY"
 
     def test_nesting_depth_one_over_limit_raises(self):
         """One level over _MAX_TYPE_NESTING_DEPTH must raise ValueError."""
         from maxcompute_catalog_mcp.tools_table_meta import _MAX_TYPE_NESTING_DEPTH
-        type_str = "ARRAY<" * (_MAX_TYPE_NESTING_DEPTH + 1) + "INT" + ">" * (_MAX_TYPE_NESTING_DEPTH + 1)
+
+        type_str = (
+            "ARRAY<" * (_MAX_TYPE_NESTING_DEPTH + 1)
+            + "INT"
+            + ">" * (_MAX_TYPE_NESTING_DEPTH + 1)
+        )
         with pytest.raises(ValueError, match="nesting depth"):
             self.parse(type_str)
 
@@ -2211,12 +2765,20 @@ class TestParseSqlType:
 # Integration tests: columns.add with complex types via update_table tool
 # ---------------------------------------------------------------------------
 
-def test_update_table_add_column_decimal_sets_precision_scale(meta_tools: Tools) -> None:
+
+def test_update_table_add_column_decimal_sets_precision_scale(
+    meta_tools: Tools,
+) -> None:
     """columns.add with DECIMAL(p,s): new field must have precision + scale set."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "price", "type": "DECIMAL(18,6)"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "price", "type": "DECIMAL(18,6)"}]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     price = next(f for f in sent.table_schema.fields if f.field_name == "price")
@@ -2228,10 +2790,15 @@ def test_update_table_add_column_decimal_sets_precision_scale(meta_tools: Tools)
 
 def test_update_table_add_column_varchar_sets_max_length(meta_tools: Tools) -> None:
     """columns.add with VARCHAR(n): new field must have max_length set."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "tag", "type": "VARCHAR(255)"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "tag", "type": "VARCHAR(255)"}]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     tag = next(f for f in sent.table_schema.fields if f.field_name == "tag")
@@ -2241,10 +2808,15 @@ def test_update_table_add_column_varchar_sets_max_length(meta_tools: Tools) -> N
 
 def test_update_table_add_column_array_type(meta_tools: Tools) -> None:
     """columns.add with ARRAY<STRING>: must produce one child field named 'element'."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "items", "type": "ARRAY<STRING>"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "items", "type": "ARRAY<STRING>"}]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     items = next(f for f in sent.table_schema.fields if f.field_name == "items")
@@ -2258,10 +2830,15 @@ def test_update_table_add_column_array_type(meta_tools: Tools) -> None:
 
 def test_update_table_add_column_map_type(meta_tools: Tools) -> None:
     """columns.add with MAP<STRING,BIGINT>: must have 'key' and 'value' child fields."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "kv", "type": "MAP<STRING,BIGINT>"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "kv", "type": "MAP<STRING,BIGINT>"}]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     kv = next(f for f in sent.table_schema.fields if f.field_name == "kv")
@@ -2274,10 +2851,17 @@ def test_update_table_add_column_map_type(meta_tools: Tools) -> None:
 
 def test_update_table_add_column_struct_type(meta_tools: Tools) -> None:
     """columns.add with STRUCT<...>: must produce named child fields, each with typeCategory."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "addr", "type": "STRUCT<city:STRING,zip:INT>"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [{"name": "addr", "type": "STRUCT<city:STRING,zip:INT>"}]
+            },
+        },
+    )
     # Note: 'addr' also exists in the original mock table; check for struct-typed one
     payload = _text_payload(r)
     # The mock table already has 'addr' — this should fail with duplicate error
@@ -2288,10 +2872,17 @@ def test_update_table_add_column_struct_type(meta_tools: Tools) -> None:
 
 def test_update_table_add_column_struct_type_new_name(meta_tools: Tools) -> None:
     """columns.add with STRUCT<...>: new column, must produce named child fields."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "location", "type": "STRUCT<city:STRING,zip:INT>"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [{"name": "location", "type": "STRUCT<city:STRING,zip:INT>"}]
+            },
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     loc = next(f for f in sent.table_schema.fields if f.field_name == "location")
@@ -2303,10 +2894,19 @@ def test_update_table_add_column_struct_type_new_name(meta_tools: Tools) -> None
 
 def test_update_table_add_column_nested_array_struct(meta_tools: Tools) -> None:
     """columns.add with ARRAY<STRUCT<...>>: nested field must be fully populated."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "records", "type": "ARRAY<STRUCT<a:INT,b:VARCHAR(64)>>"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [
+                    {"name": "records", "type": "ARRAY<STRUCT<a:INT,b:VARCHAR(64)>>"}
+                ]
+            },
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     records = next(f for f in sent.table_schema.fields if f.field_name == "records")
@@ -2322,22 +2922,34 @@ def test_update_table_add_column_nested_array_struct(meta_tools: Tools) -> None:
 
 def test_update_table_add_column_invalid_type_returns_error(meta_tools: Tools) -> None:
     """columns.add with unknown type: must return success=False, no SDK call."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "x", "type": "NOSUCHTYPE"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "x", "type": "NOSUCHTYPE"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "NOSUCHTYPE" in payload["error"] or "unknown" in payload["error"].lower()
     meta_tools.sdk.client.update_table.assert_not_called()
 
 
-def test_update_table_add_column_invalid_decimal_returns_error(meta_tools: Tools) -> None:
+def test_update_table_add_column_invalid_decimal_returns_error(
+    meta_tools: Tools,
+) -> None:
     """columns.add with DECIMAL(10) — missing scale — must return error."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "x", "type": "DECIMAL(10)"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "x", "type": "DECIMAL(10)"}]},
+        },
+    )
     payload = _text_payload(r)
     assert payload["success"] is False
     assert "DECIMAL" in payload["error"]
@@ -2346,10 +2958,15 @@ def test_update_table_add_column_invalid_decimal_returns_error(meta_tools: Tools
 
 def test_update_table_add_column_case_insensitive_type(meta_tools: Tools) -> None:
     """columns.add: lowercase type string 'bigint' must be accepted and normalized."""
-    r = meta_tools.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "cnt", "type": "bigint"}]},
-    })
+    r = meta_tools.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {"add": [{"name": "cnt", "type": "bigint"}]},
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools.sdk.client.update_table.call_args.args[0]
     cnt = next(f for f in sent.table_schema.fields if f.field_name == "cnt")
@@ -2357,7 +2974,9 @@ def test_update_table_add_column_case_insensitive_type(meta_tools: Tools) -> Non
 
 
 @pytest.fixture
-def meta_tools_pyodps_table(mock_sdk: MagicMock, mock_maxcompute_client: MagicMock) -> Tools:
+def meta_tools_pyodps_table(
+    mock_sdk: MagicMock, mock_maxcompute_client: MagicMock
+) -> Tools:
     """Tools fixture simulating a table originally created via PyODPS (not Catalog API).
 
     PyODPS-created tables return sql_type_definition in lowercase from Catalog GET
@@ -2368,16 +2987,22 @@ def meta_tools_pyodps_table(mock_sdk: MagicMock, mock_maxcompute_client: MagicMo
     from pyodps_catalog import models as catalog_models
 
     t = catalog_models.Table(
-        project_id="p1", schema_name="default", table_name="t1",
+        project_id="p1",
+        schema_name="default",
+        table_name="t1",
         etag="etag-pyodps",
         description="created by pyodps",
     )
     schema = catalog_models.TableFieldSchema()
     # Simulate PyODPS GET response: type_category uppercase, sql_type_definition lowercase
-    id_field = catalog_models.TableFieldSchema(field_name="id", type_category="BIGINT", mode="REQUIRED")
+    id_field = catalog_models.TableFieldSchema(
+        field_name="id", type_category="BIGINT", mode="REQUIRED"
+    )
     id_field.sql_type_definition = "bigint"  # lowercase — real PyODPS table behaviour
-    name_field = catalog_models.TableFieldSchema(field_name="name", type_category="STRING", mode="NULLABLE")
-    name_field.sql_type_definition = None    # None — another possible PyODPS behaviour
+    name_field = catalog_models.TableFieldSchema(
+        field_name="name", type_category="STRING", mode="NULLABLE"
+    )
+    name_field.sql_type_definition = None  # None — another possible PyODPS behaviour
     schema.fields = [id_field, name_field]
     t.table_schema = schema
 
@@ -2392,16 +3017,23 @@ def meta_tools_pyodps_table(mock_sdk: MagicMock, mock_maxcompute_client: MagicMo
     )
 
 
-def test_update_table_pyodps_fields_pass_through(meta_tools_pyodps_table: Tools) -> None:
+def test_update_table_pyodps_fields_pass_through(
+    meta_tools_pyodps_table: Tools,
+) -> None:
     """update_table on PyODPS-created table: existing fields are passed through unchanged.
 
     E2E-confirmed: the Catalog PUT API is case-insensitive for sqlTypeDefinition.
     We trust the GET response and do NOT modify existing fields.
     """
-    r = meta_tools_pyodps_table.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "description": "updated",
-    })
+    r = meta_tools_pyodps_table.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "description": "updated",
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools_pyodps_table.sdk.client.update_table.call_args.args[0]
     fields = {f.field_name: f for f in sent.table_schema.fields}
@@ -2415,16 +3047,25 @@ def test_update_table_pyodps_fields_pass_through(meta_tools_pyodps_table: Tools)
     )
 
 
-def test_update_table_add_column_on_pyodps_table(meta_tools_pyodps_table: Tools) -> None:
+def test_update_table_add_column_on_pyodps_table(
+    meta_tools_pyodps_table: Tools,
+) -> None:
     """columns.add on PyODPS-created table: new column must have type_category set.
 
     The real bug: columns.add did not set type_category, causing Catalog PUT API 400.
     Existing fields are passed through unchanged (server is case-insensitive).
     """
-    r = meta_tools_pyodps_table.call("update_table", {
-        "project": "p1", "schema": "default", "table": "t1",
-        "columns": {"add": [{"name": "age", "type": "BIGINT", "description": "user age"}]},
-    })
+    r = meta_tools_pyodps_table.call(
+        "update_table",
+        {
+            "project": "p1",
+            "schema": "default",
+            "table": "t1",
+            "columns": {
+                "add": [{"name": "age", "type": "BIGINT", "description": "user age"}]
+            },
+        },
+    )
     assert _text_payload(r)["success"] is True
     sent = meta_tools_pyodps_table.sdk.client.update_table.call_args.args[0]
     fields = {f.field_name: f for f in sent.table_schema.fields}
@@ -2438,10 +3079,12 @@ def test_update_table_add_column_on_pyodps_table(meta_tools_pyodps_table: Tools)
     assert fields["age"].description == "user age"
 
 
-def test_execute_sql_maxcu_exceeds_limit(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_maxcu_exceeds_limit(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """maxCU check: estimatedCU > maxCU → overLimit response."""
     cost_obj = MagicMock()
-    cost_obj.input_size = 10 * (1024 ** 3)  # 10 GB
+    cost_obj.input_size = 10 * (1024**3)  # 10 GB
     cost_obj.complexity = 5.0
     cost_obj.udf_num = 0
     mock_maxcompute_client.execute_sql_cost.return_value = cost_obj
@@ -2466,19 +3109,25 @@ def test_execute_sql_no_compute_returns_unsupported(tools_no_compute: Tools) -> 
     r = tools_no_compute.call("execute_sql", {"project": "p1", "sql": "SELECT 1"})
     payload = _text_payload(r)
     assert payload.get("error") == "unsupported"
-    assert "unsupported" in payload.get("message", "").lower() or \
-           "compute" in payload.get("message", "").lower()
+    assert (
+        "unsupported" in payload.get("message", "").lower()
+        or "compute" in payload.get("message", "").lower()
+    )
 
 
-def test_execute_sql_sync_with_structured_reader(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_sync_with_structured_reader(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Sync mode: open_reader with schema → structured columns + data."""
     inst = mock_maxcompute_client.run_sql.return_value
     inst.is_terminated.return_value = True
 
     reader_mock = MagicMock()
     schema_mock = MagicMock()
-    col_a = MagicMock(); col_a.name = "col_a"
-    col_b = MagicMock(); col_b.name = "col_b"
+    col_a = MagicMock()
+    col_a.name = "col_a"
+    col_b = MagicMock()
+    col_b.name = "col_b"
     schema_mock.columns = [col_a, col_b]
     reader_mock._schema = schema_mock
 
@@ -2496,7 +3145,9 @@ def test_execute_sql_sync_with_structured_reader(tools: Tools, mock_maxcompute_c
     assert len(payload.get("data", [])) == 1
 
 
-def test_execute_sql_compute_client_none_for_project(tools: Tools, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_execute_sql_compute_client_none_for_project(
+    tools: Tools, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_get_compute_client_for_project returns None → error."""
     monkeypatch.setattr(tools, "_get_compute_client_for_project", lambda p: None)
     r = tools.call("execute_sql", {"project": "other_project", "sql": "SELECT 1"})
@@ -2504,12 +3155,18 @@ def test_execute_sql_compute_client_none_for_project(tools: Tools, monkeypatch: 
     assert payload.get("success") is False
 
 
-def test_execute_sql_custom_hints(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_execute_sql_custom_hints(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Custom hints are merged with defaults."""
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1",
-        "hints": {"odps.sql.hive.compatible": "true"},
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "hints": {"odps.sql.hive.compatible": "true"},
+        },
+    )
     payload = _text_payload(r)
     # Async mode should return instanceId without error
     assert "instanceId" in payload
@@ -2522,9 +3179,15 @@ def test_execute_sql_custom_hints(tools: Tools, mock_maxcompute_client: MagicMoc
 
 def test_execute_sql_invalid_timeout(tools: Tools) -> None:
     """Invalid timeout in sync mode → error."""
-    r = tools.call("execute_sql", {
-        "project": "p1", "sql": "SELECT 1", "async": False, "timeout": "abc",
-    })
+    r = tools.call(
+        "execute_sql",
+        {
+            "project": "p1",
+            "sql": "SELECT 1",
+            "async": False,
+            "timeout": "abc",
+        },
+    )
     payload = _text_payload(r)
     assert payload.get("success") is False
     assert "timeout" in payload.get("error", "").lower()
@@ -2539,7 +3202,9 @@ def test_cost_sql_no_compute_stub(tools_no_compute: Tools) -> None:
     assert "message" in estimate
 
 
-def test_cost_sql_compute_client_none(tools: Tools, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cost_sql_compute_client_none(
+    tools: Tools, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """_get_compute_client_for_project returns None → stub."""
     monkeypatch.setattr(tools, "_get_compute_client_for_project", lambda p: None)
     r = tools.call("cost_sql", {"project": "p1", "sql": "SELECT 1"})
@@ -2547,7 +3212,9 @@ def test_cost_sql_compute_client_none(tools: Tools, monkeypatch: pytest.MonkeyPa
     assert payload["costEstimate"].get("stub") is True
 
 
-def test_cost_sql_estimation_exception(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_cost_sql_estimation_exception(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """execute_sql_cost raises → fallback stub."""
     mock_maxcompute_client.execute_sql_cost.side_effect = RuntimeError("cost error")
     r = tools.call("cost_sql", {"project": "p1", "sql": "SELECT 1"})
@@ -2556,40 +3223,55 @@ def test_cost_sql_estimation_exception(tools: Tools, mock_maxcompute_client: Mag
     assert "cost error" in payload["costEstimate"].get("message", "")
 
 
-def test_get_instance_not_terminated(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_get_instance_not_terminated(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Instance not terminated → message about waiting."""
     inst = mock_maxcompute_client.get_instance.return_value
     inst.is_terminated.return_value = False
     r = tools.call("get_instance", {"project": "p1", "instanceId": "inst-001"})
     payload = _text_payload(r)
-    assert "not terminated" in payload.get("message", "").lower() or "wait" in payload.get("message", "").lower()
+    assert (
+        "not terminated" in payload.get("message", "").lower()
+        or "wait" in payload.get("message", "").lower()
+    )
 
 
-def test_get_instance_no_results(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_get_instance_no_results(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """Terminated instance with no task results."""
     inst = mock_maxcompute_client.get_instance.return_value
     inst.is_terminated.return_value = True
     inst.get_task_results.return_value = {}
     r = tools.call("get_instance", {"project": "p1", "instanceId": "inst-001"})
     payload = _text_payload(r)
-    assert "No task results" in payload.get("message", "") or payload.get("results") == {}
+    assert (
+        "No task results" in payload.get("message", "") or payload.get("results") == {}
+    )
 
 
 def test_get_instance_status_no_compute(tools_no_compute: Tools) -> None:
     """get_instance_status without compute → unsupported."""
-    r = tools_no_compute.call("get_instance_status", {"project": "p1", "instanceId": "inst-001"})
+    r = tools_no_compute.call(
+        "get_instance_status", {"project": "p1", "instanceId": "inst-001"}
+    )
     payload = _text_payload(r)
     assert payload.get("error") == "unsupported"
 
 
 def test_get_instance_no_compute(tools_no_compute: Tools) -> None:
     """get_instance without compute → unsupported."""
-    r = tools_no_compute.call("get_instance", {"project": "p1", "instanceId": "inst-001"})
+    r = tools_no_compute.call(
+        "get_instance", {"project": "p1", "instanceId": "inst-001"}
+    )
     payload = _text_payload(r)
     assert payload.get("error") == "unsupported"
 
 
-def test_get_instance_status_exception(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_get_instance_status_exception(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """get_instance raises → error response."""
     mock_maxcompute_client.get_instance.side_effect = RuntimeError("instance error")
     r = tools.call("get_instance_status", {"project": "p1", "instanceId": "inst-002"})
@@ -2598,7 +3280,9 @@ def test_get_instance_status_exception(tools: Tools, mock_maxcompute_client: Mag
     assert "instance error" in payload.get("error", "")
 
 
-def test_get_instance_logview_address_fails(tools: Tools, mock_maxcompute_client: MagicMock) -> None:
+def test_get_instance_logview_address_fails(
+    tools: Tools, mock_maxcompute_client: MagicMock
+) -> None:
     """get_logview_address exception → logView=None."""
     inst = mock_maxcompute_client.get_instance.return_value
     inst.get_logview_address.side_effect = RuntimeError("logview error")
@@ -2645,8 +3329,10 @@ class TestCreateOdpsClientFallback:
     def _make_tools(mock_sdk, credential_client=None):
         mc = MagicMock()
         return Tools(
-            sdk=mock_sdk, default_project="p1",
-            maxcompute_client=mc, credential_client=credential_client,
+            sdk=mock_sdk,
+            default_project="p1",
+            maxcompute_client=mc,
+            credential_client=credential_client,
         )
 
     def test_credential_client_fallback(self, mock_sdk: MagicMock) -> None:
@@ -2656,9 +3342,13 @@ class TestCreateOdpsClientFallback:
         underlying = MagicMock()
         underlying.account = None  # skip first path
 
-        with patch("maxcompute_catalog_mcp.tools.ODPS") as mock_odps, \
-             patch("odps.accounts.CredentialProviderAccount") as mock_cpa:
-            result = t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
+        with (
+            patch("maxcompute_catalog_mcp.tools.ODPS") as mock_odps,
+            patch("odps.accounts.CredentialProviderAccount") as mock_cpa,
+        ):
+            result = t._create_odps_client_with_credentials(
+                underlying, "proj2", "http://ep"
+            )
             mock_cpa.assert_called_once_with(cred_client)
             mock_odps.assert_called_once()
             assert mock_odps.call_args.kwargs["account"] is mock_cpa.return_value
@@ -2668,6 +3358,7 @@ class TestCreateOdpsClientFallback:
     def test_credential_provider_import_error(self, mock_sdk: MagicMock) -> None:
         """CredentialProviderAccount not importable → RuntimeError."""
         import types
+
         cred_client = MagicMock()
         t = self._make_tools(mock_sdk, credential_client=cred_client)
         underlying = MagicMock()
@@ -2675,22 +3366,36 @@ class TestCreateOdpsClientFallback:
 
         # Replace odps.accounts with a fake module that lacks CredentialProviderAccount
         fake_accounts = types.ModuleType("odps.accounts")
-        with patch.dict("sys.modules", {"odps.accounts": fake_accounts}):
-            with pytest.raises(RuntimeError, match="CredentialProviderAccount not available"):
-                t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
+        with (
+            patch.dict("sys.modules", {"odps.accounts": fake_accounts}),
+            pytest.raises(
+                RuntimeError, match="CredentialProviderAccount not available"
+            ),
+        ):
+            t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
 
     def test_default_chain_with_sts(self, mock_sdk: MagicMock) -> None:
         """No account, no credential_client → default chain returns STS creds."""
         from maxcompute_catalog_mcp.credentials import ResolvedCredentials
+
         t = self._make_tools(mock_sdk, credential_client=None)
         underlying = MagicMock()
         underlying.account = None
 
-        creds = ResolvedCredentials(access_key_id="ak", access_key_secret="sk", security_token="tok")
-        with patch("maxcompute_catalog_mcp.credentials.get_credentials_from_default_chain", return_value=creds), \
-             patch("maxcompute_catalog_mcp.tools.ODPS") as mock_odps, \
-             patch("odps.accounts.StsAccount") as mock_sts:
-            result = t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
+        creds = ResolvedCredentials(
+            access_key_id="ak", access_key_secret="sk", security_token="tok"
+        )
+        with (
+            patch(
+                "maxcompute_catalog_mcp.credentials.get_credentials_from_default_chain",
+                return_value=creds,
+            ),
+            patch("maxcompute_catalog_mcp.tools.ODPS") as mock_odps,
+            patch("odps.accounts.StsAccount") as mock_sts,
+        ):
+            result = t._create_odps_client_with_credentials(
+                underlying, "proj2", "http://ep"
+            )
             mock_sts.assert_called_once_with("ak", "sk", "tok")
             assert mock_odps.call_args.kwargs["account"] is mock_sts.return_value
             assert result is mock_odps.return_value
@@ -2698,14 +3403,22 @@ class TestCreateOdpsClientFallback:
     def test_default_chain_without_sts(self, mock_sdk: MagicMock) -> None:
         """No account, no credential_client → default chain returns AK/SK only."""
         from maxcompute_catalog_mcp.credentials import ResolvedCredentials
+
         t = self._make_tools(mock_sdk, credential_client=None)
         underlying = MagicMock()
         underlying.account = None
 
         creds = ResolvedCredentials(access_key_id="ak", access_key_secret="sk")
-        with patch("maxcompute_catalog_mcp.credentials.get_credentials_from_default_chain", return_value=creds), \
-             patch("maxcompute_catalog_mcp.tools.ODPS") as mock_odps:
-            result = t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
+        with (
+            patch(
+                "maxcompute_catalog_mcp.credentials.get_credentials_from_default_chain",
+                return_value=creds,
+            ),
+            patch("maxcompute_catalog_mcp.tools.ODPS") as mock_odps,
+        ):
+            result = t._create_odps_client_with_credentials(
+                underlying, "proj2", "http://ep"
+            )
             assert mock_odps.call_args.kwargs["access_id"] == "ak"
             assert mock_odps.call_args.kwargs["secret_access_key"] == "sk"
             assert result is mock_odps.return_value
@@ -2716,10 +3429,14 @@ class TestCreateOdpsClientFallback:
         underlying = MagicMock()
         underlying.account = None
 
-        with patch("maxcompute_catalog_mcp.credentials.get_credentials_from_default_chain",
-                   side_effect=ValueError("no creds")):
-            with pytest.raises(RuntimeError, match="No valid credentials found"):
-                t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
+        with (
+            patch(
+                "maxcompute_catalog_mcp.credentials.get_credentials_from_default_chain",
+                side_effect=ValueError("no creds"),
+            ),
+            pytest.raises(RuntimeError, match="No valid credentials found"),
+        ):
+            t._create_odps_client_with_credentials(underlying, "proj2", "http://ep")
 
 
 # ============================================================================
@@ -2740,7 +3457,9 @@ class TestComputeClientCache:
     def test_cache_write_and_reuse(self, mock_sdk: MagicMock) -> None:
         """New project → create client → cache → reuse on second call."""
         t = self._make_tools(mock_sdk)
-        with patch.object(t, "_create_odps_client_with_credentials", return_value=MagicMock()):
+        with patch.object(
+            t, "_create_odps_client_with_credentials", return_value=MagicMock()
+        ):
             result1 = t._get_compute_client_for_project("proj_new")
             assert result1 is not None
             assert "proj_new" in t._compute_client_cache
@@ -2753,7 +3472,9 @@ class TestComputeClientCache:
         t = self._make_tools(mock_sdk)
         t._max_compute_client_cache_size = 3
 
-        with patch.object(t, "_create_odps_client_with_credentials", return_value=MagicMock()):
+        with patch.object(
+            t, "_create_odps_client_with_credentials", return_value=MagicMock()
+        ):
             for i in range(5):
                 t._get_compute_client_for_project(f"proj_{i}")
 
@@ -2772,17 +3493,24 @@ class TestComputeClientCache:
             t._compute_client_cache["contested_proj"] = existing_client
             return MagicMock()  # newly created client (will be discarded)
 
-        with patch.object(t, "_create_odps_client_with_credentials", side_effect=inject_cache_entry):
+        with patch.object(
+            t, "_create_odps_client_with_credentials", side_effect=inject_cache_entry
+        ):
             result = t._get_compute_client_for_project("contested_proj")
             assert result is existing_client
 
     def test_creation_failure_propagates(self, mock_sdk: MagicMock) -> None:
         """Client creation raises → RuntimeError propagated."""
         t = self._make_tools(mock_sdk)
-        with patch.object(t, "_create_odps_client_with_credentials",
-                         side_effect=ValueError("bad creds")):
-            with pytest.raises(RuntimeError, match="Cannot create compute client"):
-                t._get_compute_client_for_project("proj_fail")
+        with (
+            patch.object(
+                t,
+                "_create_odps_client_with_credentials",
+                side_effect=ValueError("bad creds"),
+            ),
+            pytest.raises(RuntimeError, match="Cannot create compute client"),
+        ):
+            t._get_compute_client_for_project("proj_fail")
 
 
 # ============================================================================
@@ -2802,7 +3530,8 @@ def test_cost_sql_truncated(tools: Tools) -> None:
 
 
 def test_execute_sql_sync_structured_reader(
-    mock_sdk: MagicMock, mock_maxcompute_client: MagicMock,
+    mock_sdk: MagicMock,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """Sync mode SELECT → structured reader returns columns + rows."""
     col_mock = MagicMock()
@@ -2827,7 +3556,8 @@ def test_execute_sql_sync_structured_reader(
     mock_maxcompute_client.run_sql.return_value = inst
 
     t = Tools(
-        sdk=mock_sdk, default_project="p1",
+        sdk=mock_sdk,
+        default_project="p1",
         maxcompute_client=mock_maxcompute_client,
     )
     r = t.call("execute_sql", {"sql": "SELECT 1", "async": False})
@@ -2838,15 +3568,20 @@ def test_execute_sql_sync_structured_reader(
 
 
 def test_execute_sql_outer_exception(
-    mock_sdk: MagicMock, mock_maxcompute_client: MagicMock,
+    mock_sdk: MagicMock,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """_get_compute_client_for_project raises → caught by outer except."""
     t = Tools(
-        sdk=mock_sdk, default_project="p1",
+        sdk=mock_sdk,
+        default_project="p1",
         maxcompute_client=mock_maxcompute_client,
     )
-    with patch.object(t, "_get_compute_client_for_project",
-                     side_effect=RuntimeError("client creation failed")):
+    with patch.object(
+        t,
+        "_get_compute_client_for_project",
+        side_effect=RuntimeError("client creation failed"),
+    ):
         r = t.call("execute_sql", {"sql": "SELECT 1"})
         payload = _text_payload(r)
         assert payload["success"] is False
@@ -2854,7 +3589,8 @@ def test_execute_sql_outer_exception(
 
 
 def test_get_instance_structured_reader(
-    mock_sdk: MagicMock, mock_maxcompute_client: MagicMock,
+    mock_sdk: MagicMock,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """get_instance with terminated instance + open_reader → structured data."""
     col1 = MagicMock()
@@ -2883,7 +3619,8 @@ def test_get_instance_structured_reader(
     mock_maxcompute_client.get_instance.return_value = inst
 
     t = Tools(
-        sdk=mock_sdk, default_project="p1",
+        sdk=mock_sdk,
+        default_project="p1",
         maxcompute_client=mock_maxcompute_client,
     )
     r = t.call("get_instance", {"instanceId": "inst-001"})
@@ -2895,7 +3632,8 @@ def test_get_instance_structured_reader(
 
 
 def test_get_instance_no_reader_fallback(
-    mock_sdk: MagicMock, mock_maxcompute_client: MagicMock,
+    mock_sdk: MagicMock,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """get_instance: task_result without open_reader → str() fallback."""
     inst = MagicMock()
@@ -2905,7 +3643,8 @@ def test_get_instance_no_reader_fallback(
     mock_maxcompute_client.get_instance.return_value = inst
 
     t = Tools(
-        sdk=mock_sdk, default_project="p1",
+        sdk=mock_sdk,
+        default_project="p1",
         maxcompute_client=mock_maxcompute_client,
     )
     r = t.call("get_instance", {"instanceId": "inst-002"})
@@ -2914,7 +3653,8 @@ def test_get_instance_no_reader_fallback(
 
 
 def test_get_instance_reader_exception(
-    mock_sdk: MagicMock, mock_maxcompute_client: MagicMock,
+    mock_sdk: MagicMock,
+    mock_maxcompute_client: MagicMock,
 ) -> None:
     """get_instance: open_reader raises → error dict per task."""
     task_result = MagicMock()
@@ -2926,7 +3666,8 @@ def test_get_instance_reader_exception(
     mock_maxcompute_client.get_instance.return_value = inst
 
     t = Tools(
-        sdk=mock_sdk, default_project="p1",
+        sdk=mock_sdk,
+        default_project="p1",
         maxcompute_client=mock_maxcompute_client,
     )
     r = t.call("get_instance", {"instanceId": "inst-003"})
@@ -2988,37 +3729,60 @@ class TestIsDeniedPathWindows:
     @staticmethod
     def _is_denied_win(path: Path, prefixes: tuple) -> bool:
         import maxcompute_catalog_mcp.tools_compute as tc_mod
+
         prefixes_lc = tuple(str(p).lower() for p in prefixes)
-        with patch.object(tc_mod.os, "name", "nt"), \
-             patch.object(tc_mod, "_DENIED_PREFIXES", prefixes), \
-             patch.object(tc_mod, "_DENIED_PREFIXES_WIN_LC", prefixes_lc):
+        with (
+            patch.object(tc_mod.os, "name", "nt"),
+            patch.object(tc_mod, "_DENIED_PREFIXES", prefixes),
+            patch.object(tc_mod, "_DENIED_PREFIXES_WIN_LC", prefixes_lc),
+        ):
             return tc_mod._is_denied_path(path)
 
     def test_case_insensitive_exact_match(self) -> None:
         from pathlib import PureWindowsPath
+
         prefixes = (PureWindowsPath("C:\\Windows"),)
         assert self._is_denied_win(PureWindowsPath("c:/windows"), prefixes) is True
         assert self._is_denied_win(PureWindowsPath("C:/WINDOWS"), prefixes) is True
 
     def test_case_insensitive_child(self) -> None:
         from pathlib import PureWindowsPath
+
         prefixes = (PureWindowsPath("C:\\Windows"),)
-        assert self._is_denied_win(PureWindowsPath("C:/WINDOWS/System32/evil.jsonl"), prefixes) is True
-        assert self._is_denied_win(PureWindowsPath("c:/windows/system32/drivers"), prefixes) is True
+        assert (
+            self._is_denied_win(
+                PureWindowsPath("C:/WINDOWS/System32/evil.jsonl"), prefixes
+            )
+            is True
+        )
+        assert (
+            self._is_denied_win(
+                PureWindowsPath("c:/windows/system32/drivers"), prefixes
+            )
+            is True
+        )
 
     def test_different_prefix_not_false_positive(self) -> None:
         from pathlib import PureWindowsPath
+
         prefixes = (PureWindowsPath("C:\\Windows"),)
-        assert self._is_denied_win(PureWindowsPath("C:/Windows2/app"), prefixes) is False
-        assert self._is_denied_win(PureWindowsPath("C:/Users/safe.jsonl"), prefixes) is False
+        assert (
+            self._is_denied_win(PureWindowsPath("C:/Windows2/app"), prefixes) is False
+        )
+        assert (
+            self._is_denied_win(PureWindowsPath("C:/Users/safe.jsonl"), prefixes)
+            is False
+        )
 
     def test_drive_root_not_false_positive(self) -> None:
         from pathlib import PureWindowsPath
+
         prefixes = (PureWindowsPath("C:\\Windows"),)
         assert self._is_denied_win(PureWindowsPath("C:/"), prefixes) is False
 
 
 # ---- Windows path handling tests ----
+
 
 class TestWindowsPathHandling:
     """Tests for Windows path parsing in _resolve_output_uri.
@@ -3030,6 +3794,7 @@ class TestWindowsPathHandling:
     @staticmethod
     def _resolve(uri: str) -> Path:
         from maxcompute_catalog_mcp.tools_compute import _resolve_output_uri
+
         return _resolve_output_uri(uri, create_dir=False)
 
     def test_bare_windows_path_rejected_on_posix(self) -> None:
@@ -3043,6 +3808,7 @@ class TestWindowsPathHandling:
     def test_file_uri_windows_drive_letter(self) -> None:
         """file:///C:/... URI must parse correctly on Windows."""
         import tempfile
+
         tmpdir = tempfile.gettempdir()
         uri = Path(tmpdir, "test_win.jsonl").as_uri()
         result = self._resolve(uri)
@@ -3068,6 +3834,7 @@ class TestWindowsPathHandling:
     def test_percent_encoded_uri_decoded(self) -> None:
         """Percent-encoded characters in file:// URI (e.g. %20) must be decoded."""
         import tempfile
+
         tmpdir = tempfile.gettempdir()
         safe_path = os.path.join(tmpdir, "space dir", "out.jsonl")
         uri = Path(safe_path).as_uri()
@@ -3111,7 +3878,9 @@ class TestWindowsPathHandling:
         with pytest.raises(ValueError, match="Windows-style"):
             self._resolve("file:///C:/Users/out.jsonl")
 
-    @pytest.mark.skipif(os.name != "nt", reason="Windows-specific: percent-encoded UNC in file:// URI")
+    @pytest.mark.skipif(
+        os.name != "nt", reason="Windows-specific: percent-encoded UNC in file:// URI"
+    )
     def test_file_uri_percent_encoded_unc_rejected(self) -> None:
         """file:///%5C%5Cserver%5Cshare must be rejected as UNC on Windows."""
         with pytest.raises(ValueError, match="UNC"):
@@ -3130,9 +3899,15 @@ class TestWindowsPathHandling:
     def test_malformed_file_uri_raises_valueerror(self) -> None:
         """Malformed file:// URI that causes url2pathname OSError must raise ValueError."""
         import unittest.mock
-        with unittest.mock.patch("maxcompute_catalog_mcp.tools_compute.url2pathname", side_effect=OSError("bad URI")):
-            with pytest.raises(ValueError, match="Malformed"):
-                self._resolve("file:///some/path/out.jsonl")
+
+        with (
+            unittest.mock.patch(
+                "maxcompute_catalog_mcp.tools_compute.url2pathname",
+                side_effect=OSError("bad URI"),
+            ),
+            pytest.raises(ValueError, match="Malformed"),
+        ):
+            self._resolve("file:///some/path/out.jsonl")
 
     def test_leading_whitespace_unc_bypass_rejected(self) -> None:
         """URI with leading whitespace before UNC path must be rejected."""

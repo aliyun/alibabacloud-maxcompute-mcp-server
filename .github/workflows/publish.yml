@@ -1,0 +1,112 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish distributions
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # Required for PyPI Trusted Publishing's short-lived OIDC token.
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+
+      - name: Verify release source and version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          git merge-base --is-ancestor HEAD origin/master
+          uv run --no-project --python 3.12 python - <<'PY'
+          import os
+          import re
+          import tomllib
+
+          release_tag = os.environ["RELEASE_TAG"]
+          with open("pyproject.toml", "rb") as pyproject_file:
+              project_version = tomllib.load(pyproject_file)["project"]["version"]
+
+          expected_tag = f"v{project_version}"
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", release_tag):
+              raise SystemExit(f"release tag must be vX.Y.Z, got {release_tag!r}")
+          if release_tag != expected_tag:
+              raise SystemExit(
+                  f"release tag {release_tag!r} does not match project version {project_version!r}"
+              )
+          PY
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Check package metadata and README rendering
+        run: uvx --from twine twine check --strict dist/*
+
+      - name: Smoke test the built wheel
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run --isolated --no-project --with dist/*.whl python -c \
+            'import os; from importlib.metadata import version; import maxcompute_catalog_mcp; assert version("alibabacloud-maxcompute-mcp-server") == os.environ["RELEASE_TAG"].removeprefix("v")'
+          uvx --from dist/*.whl alibabacloud-maxcompute-mcp-server --help
+
+      - name: Record distribution hashes
+        run: sha256sum dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to create the GitHub Release after PyPI succeeds.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Extract changelog notes for this tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { flag = 1; next }
+            flag && /^## \[/ { exit }
+            flag { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            printf 'Release %s\n' "$TAG" > release-notes.md
+          fi
+          echo "----- release notes -----"
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes-file release-notes.md

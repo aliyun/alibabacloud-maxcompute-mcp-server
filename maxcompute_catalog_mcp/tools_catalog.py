@@ -3,16 +3,20 @@
 Provides CatalogMixin with handlers for browsing projects, schemas, tables,
 partitions, and searching metadata via the Catalog API.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any
 
 from pyodps_catalog import models as catalog_models
 
 from .mcp_protocol import mcp_ok_result, mcp_text_result
 from .tools_common import _unsupported, opt_arg, opt_int, require_arg
 from .tools_table_meta import serialize_table_meta
+
+if TYPE_CHECKING:
+    from .maxcompute_client import MaxComputeCatalogSdk
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,14 @@ class CatalogMixin:
     _is_schema_enabled().
     """
 
-    def list_projects(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    if TYPE_CHECKING:
+        sdk: MaxComputeCatalogSdk
+        default_project: str
+        namespace_id: str
+
+        def _is_schema_enabled(self, project: str) -> bool: ...
+
+    def list_projects(self, args: dict[str, Any]) -> dict[str, Any]:
         page_size = opt_int(args, "pageSize", 100)
         token = opt_arg(args, "token")
         resp = self.sdk.client.list_projects(page_size=page_size, page_token=token)
@@ -33,48 +44,60 @@ class CatalogMixin:
         summary = f"{len(items)} project(s)" if items else "0 projects"
         return mcp_ok_result(m, summary=summary)
 
-    def get_project(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def get_project(self, args: dict[str, Any]) -> dict[str, Any]:
         project = require_arg(args, "project", "Project name cannot be empty")
         resp = self.sdk.client.get_project(project_id=project)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
         return mcp_ok_result(m)
 
-    def list_schemas(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def list_schemas(self, args: dict[str, Any]) -> dict[str, Any]:
         project = opt_arg(args, "project", self.default_project) or self.default_project
         if not self._is_schema_enabled(project):
-            logger.info("Project %r is 2-level (schemaEnabled=false); returning synthetic default schema.", project)
+            logger.info(
+                "Project %r is 2-level (schemaEnabled=false); returning synthetic default schema.",
+                project,
+            )
             return mcp_ok_result(
                 {"schemas": [{"name": "default"}]},
                 summary="2-level project, returning synthetic default schema",
             )
         page_size = opt_int(args, "pageSize", 100)
         token = opt_arg(args, "token")
-        resp = self.sdk.client.list_schemas(project_id=project, page_size=page_size, page_token=token)
+        resp = self.sdk.client.list_schemas(
+            project_id=project, page_size=page_size, page_token=token
+        )
         m = resp.to_map() if hasattr(resp, "to_map") else resp
         items = m.get("schemas") or []
         summary = f"{len(items)} schema(s)" if items else "0 schemas"
         return mcp_ok_result(m, summary=summary)
 
-    def get_schema(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def get_schema(self, args: dict[str, Any]) -> dict[str, Any]:
         project = opt_arg(args, "project", self.default_project) or self.default_project
         schema = opt_arg(args, "schema", "default") or "default"
         if not self._is_schema_enabled(project):
-            logger.info("Project %r is 2-level (schemaEnabled=false); returning synthetic schema.", project)
+            logger.info(
+                "Project %r is 2-level (schemaEnabled=false); returning synthetic schema.",
+                project,
+            )
             return mcp_ok_result(
-                {"name": schema, "project": project, "description": "2-level project (no schema support)"},
+                {
+                    "name": schema,
+                    "project": project,
+                    "description": "2-level project (no schema support)",
+                },
             )
         resp = self.sdk.client.get_schema(project_id=project, schema_name=schema)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
         return mcp_ok_result(m)
 
-    def list_tables(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def list_tables(self, args: dict[str, Any]) -> dict[str, Any]:
         project = opt_arg(args, "project", self.default_project) or self.default_project
         schema = opt_arg(args, "schema", "default") or "default"
         page_size = opt_int(args, "pageSize", 100)
         token = opt_arg(args, "token")
         table_filter = opt_arg(args, "filter")
 
-        list_kwargs: Dict[str, Any] = {
+        list_kwargs: dict[str, Any] = {
             "project_id": project,
             "schema_name": schema,
             "page_size": page_size,
@@ -85,7 +108,8 @@ class CatalogMixin:
         items = m.get("tables") or []
         if table_filter:
             items = [
-                t for t in items
+                t
+                for t in items
                 if (t.get("tableName") or t.get("name", "")).startswith(table_filter)
             ]
             m["tables"] = items
@@ -95,7 +119,7 @@ class CatalogMixin:
         naming_model = "3-level" if schema_enabled else "2-level"
         return mcp_ok_result({**m, "namingModel": naming_model}, summary=summary)
 
-    def get_table_schema(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def get_table_schema(self, args: dict[str, Any]) -> dict[str, Any]:
         """Return column names, types, comments and partition keys (like DESC).
 
         Handles 2-level projects by omitting schema from the Catalog API call.
@@ -106,7 +130,9 @@ class CatalogMixin:
 
         return self._get_table_via_catalog(project, schema, table)
 
-    def _get_table_via_catalog(self, project: str, schema: str, table: str) -> Dict[str, Any]:
+    def _get_table_via_catalog(
+        self, project: str, schema: str, table: str
+    ) -> dict[str, Any]:
         """Call Catalog API get_table and return a unified schema + metadata view.
 
         The payload exposes only business-facing fields:
@@ -117,7 +143,9 @@ class CatalogMixin:
           ``labels``, ``expiration``, ``type``, ``etag``, ``createTime``,
           ``lastModifiedTime``.
         """
-        t = catalog_models.Table(project_id=project, schema_name=schema, table_name=table)
+        t = catalog_models.Table(
+            project_id=project, schema_name=schema, table_name=table
+        )
         resp = self.sdk.client.get_table(t)
 
         # Fallback path: SDK returned an unexpected dict-like (older mocks / raw map)
@@ -163,7 +191,7 @@ class CatalogMixin:
             }
         )
 
-    def get_partition_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def get_partition_info(self, args: dict[str, Any]) -> dict[str, Any]:
         """List partitions for a partitioned table (Catalog API only).
 
         Handles 2-level projects by omitting schema_name from the API call.
@@ -196,7 +224,7 @@ class CatalogMixin:
 
     # ---- metadata search ----
 
-    def search_meta_data(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def search_meta_data(self, args: dict[str, Any]) -> dict[str, Any]:
         """Search metadata by keyword. Uses Catalog API namespaces/:search via SDK Client.search."""
         query = require_arg(args, "query", "Search query cannot be empty")
         page_size = opt_int(args, "pageSize", 100)
@@ -205,7 +233,9 @@ class CatalogMixin:
 
         catalog_client = getattr(self.sdk, "client", None)
         if catalog_client is None:
-            return _unsupported("Metadata search requires Catalog SDK (pyodps_catalog) support, which is not configured.")
+            return _unsupported(
+                "Metadata search requires Catalog SDK (pyodps_catalog) support, which is not configured."
+            )
 
         namespace_id = self.namespace_id or ""
         if not namespace_id:
@@ -221,10 +251,14 @@ class CatalogMixin:
                 page_token=token or "",
                 order_by=order_by or "",
             )
-            m = resp.to_map() if hasattr(resp, "to_map") else {
-                "entries": getattr(resp, "entries", []),
-                "next_page_token": getattr(resp, "next_page_token", None),
-            }
+            m = (
+                resp.to_map()
+                if hasattr(resp, "to_map")
+                else {
+                    "entries": getattr(resp, "entries", []),
+                    "next_page_token": getattr(resp, "next_page_token", None),
+                }
+            )
             return mcp_text_result(m)
         except Exception as e:
             logger.exception("search_meta_data failed")

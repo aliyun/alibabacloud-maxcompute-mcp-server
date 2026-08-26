@@ -1,12 +1,14 @@
 """Pytest fixtures: mock SDK/client and Tools instance for unit tests; real Tools when config exists."""
+
 from __future__ import annotations
 
 import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,7 +29,7 @@ def clear_host_alibaba_cloud_credentials(monkeypatch: pytest.MonkeyPatch) -> Non
         "ALIBABA_CLOUD_CREDENTIALS_URI",
     ):
         monkeypatch.delenv(name, raising=False)
-    import alibabacloud_credentials.utils.auth_util as auth_util
+    from alibabacloud_credentials.utils import auth_util
 
     for attribute in (
         "environment_access_key_id",
@@ -63,6 +65,7 @@ def _make_readonly_guard(get_instance: Callable[[], Any]) -> Callable[..., Any]:
             Use ``lambda: inst`` for a fixed instance or
             ``lambda: mc.run_sql.return_value`` for mock-configurable one.
     """
+
     def _run_sql(sql: str, *, hints: dict | None = None, **_kwargs: Any) -> Any:
         if hints and hints.get("odps.sql.read.only") == "true":
             # _normalize_sql already strips string literals, so scanning
@@ -76,6 +79,7 @@ def _make_readonly_guard(get_instance: Callable[[], Any]) -> Callable[..., Any]:
                         f"(odps.sql.read.only=true)"
                     )
         return get_instance()
+
     return _run_sql
 
 
@@ -109,11 +113,18 @@ def drop_table(real_tools: Any, table: str) -> None:
     logger = logging.getLogger(__name__)
     try:
         real_tools.maxcompute_client.execute_sql(f"DROP TABLE IF EXISTS {table};")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- live cleanup must tolerate provider errors.
         logger.warning("cleanup DROP TABLE %s failed: %s", table, e)
 
 
-def count_rows(real_tools: Any, project: str, table: str, *, partition: str | None = None, hints: dict | None = None) -> int:
+def count_rows(
+    real_tools: Any,
+    project: str,
+    table: str,
+    *,
+    partition: str | None = None,
+    hints: dict | None = None,
+) -> int:
     """Count rows via execute_sql MCP tool (sync)."""
     where = f" WHERE {partition}" if partition else ""
     args: dict = {
@@ -136,6 +147,7 @@ def count_rows(real_tools: Any, project: str, table: str, *, partition: str | No
 
 def _get_tools_class():
     from maxcompute_catalog_mcp.tools import Tools
+
     return Tools
 
 
@@ -270,8 +282,15 @@ def call_safe(tools: Any, tool_name: str, args: dict) -> dict:
     """
     try:
         return tools.call(tool_name, args)
-    except Exception as e:
-        return {"content": [{"type": "text", "text": json.dumps({"success": False, "error": str(e)})}]}
+    except Exception as e:  # noqa: BLE001 -- normalize arbitrary mocked SDK failures.
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({"success": False, "error": str(e)}),
+                }
+            ]
+        }
 
 
 def async_wait_instance(
@@ -291,10 +310,13 @@ def async_wait_instance(
     """
     deadline = time.time() + timeout
     while True:
-        r = real_tools.call("get_instance_status", {
-            "project": project,
-            "instanceId": instance_id,
-        })
+        r = real_tools.call(
+            "get_instance_status",
+            {
+                "project": project,
+                "instanceId": instance_id,
+            },
+        )
         p = text_payload(r)
         if p.get("success") is False:
             return p
@@ -311,6 +333,7 @@ def async_wait_instance(
 
 # ---- Real config / integration ----
 
+
 def _real_config_path() -> Path:
     import os
 
@@ -326,10 +349,12 @@ def real_configs():
 
     config_path = _real_config_path()
     if not config_path.exists():
-        pytest.skip("no config file (config.json or MAXCOMPUTE_CATALOG_CONFIG) for integration tests")
+        pytest.skip(
+            "no config file (config.json or MAXCOMPUTE_CATALOG_CONFIG) for integration tests"
+        )
     try:
         return load_configs(str(config_path))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- malformed files and SDK config may vary.
         pytest.skip(f"config load failed: {e}")
 
 
@@ -351,7 +376,7 @@ def real_tools(real_configs):
         cs = build_client_set(configs[default_name])
     except (ValueError, RuntimeError) as e:
         pytest.skip(f"Failed to build client set: {e}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- live SDK initialization may vary.
         pytest.skip(f"Failed to build client set: {type(e).__name__}: {e}")
     return Tools(
         sdk=cs.sdk,

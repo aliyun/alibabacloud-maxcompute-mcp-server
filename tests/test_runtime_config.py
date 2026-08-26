@@ -43,9 +43,7 @@ def test_legacy_public_config_automatically_derives_regional_mcp(
     assert config.mode is RuntimeMode.DEFAULT
     assert config.profile == "default"
     assert config.remote is not None
-    assert config.remote.url == (
-        "https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp"
-    )
+    assert config.remote.url == ("https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp")
 
 
 def test_legacy_odps_alias_is_still_loaded_for_remote_selection(
@@ -320,8 +318,7 @@ def test_legacy_singapore_vpc_config_derives_regional_mcp(
     path = _write_config(
         tmp_path,
         _legacy_config(
-            "https://service.ap-southeast-1-vpc."
-            "maxcompute.aliyun-inc.com/api",
+            "https://service.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/api",
         ),
     )
 
@@ -343,10 +340,7 @@ def test_legacy_singapore_vpc_config_derives_regional_mcp(
         ),
         (
             "https://service.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/api",
-            (
-                "https://mcp-intl.ap-southeast-1-vpc."
-                "maxcompute.aliyun-inc.com/mcp"
-            ),
+            ("https://mcp-intl.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/mcp"),
         ),
     ],
 )
@@ -400,9 +394,7 @@ def test_explicit_remote_without_url_derives_regional_endpoint(
 
     assert config.mode is RuntimeMode.REMOTE
     assert config.remote is not None
-    assert config.remote.url == (
-        "https://mcp-intl.eu-west-1.maxcompute.aliyun.com/mcp"
-    )
+    assert config.remote.url == ("https://mcp-intl.eu-west-1.maxcompute.aliyun.com/mcp")
 
 
 def test_unknown_legacy_endpoint_stays_local_instead_of_guessing(
@@ -475,8 +467,7 @@ def test_named_profile_drives_network_and_region_selection(tmp_path: Path) -> No
                 },
                 "vpc": {
                     "maxcompute_endpoint": (
-                        "https://service.cn-hongkong-vpc."
-                        "maxcompute.aliyun-inc.com/api"
+                        "https://service.cn-hongkong-vpc.maxcompute.aliyun-inc.com/api"
                     ),
                     "catalogapi_endpoint": "https://catalog-vpc.example.com",
                     "accessKeyId": "vpc-ak",
@@ -562,10 +553,7 @@ def test_vpc_config_rejects_explicit_other_region_vpc_url(
         {
             "mode": "remote",
             "remote": {
-                "url": (
-                    "https://mcp.cn-hongkong-vpc."
-                    "maxcompute.aliyun-inc.com/mcp"
-                ),
+                "url": ("https://mcp.cn-hongkong-vpc.maxcompute.aliyun-inc.com/mcp"),
             },
         }
     )
@@ -583,10 +571,7 @@ def test_public_config_rejects_explicit_vpc_remote_url(tmp_path: Path) -> None:
         {
             "mode": "remote",
             "remote": {
-                "url": (
-                    "https://mcp.cn-hangzhou-vpc."
-                    "maxcompute.aliyun-inc.com/mcp"
-                ),
+                "url": ("https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp"),
             },
         }
     )

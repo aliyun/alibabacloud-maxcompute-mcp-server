@@ -1,30 +1,31 @@
 """Unit tests for tools_common.py — boundary/edge cases for shared utilities."""
+
 from __future__ import annotations
 
 import pytest
 
+from maxcompute_catalog_mcp.mcp_protocol import JsonRpcError
 from maxcompute_catalog_mcp.tools_common import (
+    _build_timeout_response,
     _escape_identifier,
     _is_read_only_sql,
     _quote_partition_literal,
     _quote_sql_value,
+    _unsupported,
+    input_schema,
+    int_prop,
     opt_arg,
     opt_int,
     parse_bool,
     parse_timeout,
     require_arg,
     string_prop,
-    int_prop,
-    input_schema,
-    _build_timeout_response,
-    _unsupported,
 )
-from maxcompute_catalog_mcp.mcp_protocol import JsonRpcError
-
 
 # ---------------------------------------------------------------------------
 # _quote_sql_value()
 # ---------------------------------------------------------------------------
+
 
 class TestQuoteSqlValue:
     def test_none(self) -> None:
@@ -64,6 +65,7 @@ class TestQuoteSqlValue:
 # _quote_partition_literal()
 # ---------------------------------------------------------------------------
 
+
 class TestQuotePartitionLiteral:
     def test_none_raises(self) -> None:
         with pytest.raises(ValueError, match="cannot be NULL"):
@@ -91,6 +93,7 @@ class TestQuotePartitionLiteral:
 # _is_read_only_sql()
 # ---------------------------------------------------------------------------
 
+
 class TestIsReadOnlySql:
     def test_select(self) -> None:
         is_safe, msg = _is_read_only_sql("SELECT * FROM t")
@@ -112,7 +115,7 @@ class TestIsReadOnlySql:
         assert "DROP" in (msg or "")
 
     def test_empty(self) -> None:
-        is_safe, msg = _is_read_only_sql("")
+        is_safe, _msg = _is_read_only_sql("")
         assert is_safe is False
 
     def test_whitespace_only(self) -> None:
@@ -157,6 +160,7 @@ class TestIsReadOnlySql:
 # _escape_identifier()
 # ---------------------------------------------------------------------------
 
+
 class TestEscapeIdentifier:
     def test_normal(self) -> None:
         assert _escape_identifier("my_table") == "`my_table`"
@@ -177,6 +181,7 @@ class TestEscapeIdentifier:
 # ---------------------------------------------------------------------------
 # Argument helpers
 # ---------------------------------------------------------------------------
+
 
 class TestRequireArg:
     def test_present(self) -> None:
@@ -263,6 +268,7 @@ class TestParseBool:
 # Schema helpers
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaHelpers:
     def test_string_prop(self) -> None:
         p = string_prop("desc")
@@ -292,14 +298,17 @@ class TestSchemaHelpers:
 # Utility functions
 # ---------------------------------------------------------------------------
 
+
 class TestBuildTimeoutResponse:
     def test_basic(self) -> None:
         from unittest.mock import MagicMock
+
         inst = MagicMock()
         inst.id = "inst-123"
         result = _build_timeout_response(inst, "proj", 30, "Query")
         content = result["content"]
         import json
+
         payload = json.loads(content[0]["text"])
         assert payload["success"] is False
         assert payload["timeout"] is True
@@ -310,6 +319,7 @@ class TestBuildTimeoutResponse:
 class TestUnsupported:
     def test_basic(self) -> None:
         import json
+
         result = _unsupported("reason text")
         payload = json.loads(result["content"][0]["text"])
         assert payload["error"] == "unsupported"

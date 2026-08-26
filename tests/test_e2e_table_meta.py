@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """E2E tests: update_table (table metadata update tool).
 
 Currently there is NO E2E coverage for update_table; this file provides
@@ -18,19 +17,28 @@ All tables created here use a unique `mcpe2etm_` prefix and are dropped in teard
 
 Requires config.json (or MAXCOMPUTE_CATALOG_CONFIG env var).
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import Any
 
 import pytest
 
 from maxcompute_catalog_mcp.tools import Tools
 from tests.conftest import (
     data as _data,
+)
+from tests.conftest import (
     drop_table as _drop,
+)
+from tests.conftest import (
     has_config as _has_config,
+)
+from tests.conftest import (
     text_payload as _text_payload,
+)
+from tests.conftest import (
     uniq as _uniq,
 )
 
@@ -39,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def created_tables(real_tools: Tools):
-    names: List[str] = []
+    names: list[str] = []
     yield names
     for t in names:
         _drop(real_tools, t)
@@ -47,28 +55,34 @@ def created_tables(real_tools: Tools):
 
 def _create_simple_table(real_tools: Tools, project: str, table: str) -> None:
     """Helper: create a basic table with two columns."""
-    r = real_tools.call("create_table", {
-        "project": project,
-        "schema": "default",
-        "table": table,
-        "columns": [
-            {"name": "id", "type": "BIGINT"},
-            {"name": "name", "type": "STRING"},
-        ],
-        "description": "initial description",
-        "lifecycle": 1,
-    })
+    r = real_tools.call(
+        "create_table",
+        {
+            "project": project,
+            "schema": "default",
+            "table": table,
+            "columns": [
+                {"name": "id", "type": "BIGINT"},
+                {"name": "name", "type": "STRING"},
+            ],
+            "description": "initial description",
+            "lifecycle": 1,
+        },
+    )
     p = _text_payload(r)
     assert p.get("success") is True, f"create_table failed: {p}"
 
 
 def _get_table_schema(real_tools: Tools, project: str, table: str) -> dict:
     """Helper: call get_table_schema and return the data payload."""
-    r = real_tools.call("get_table_schema", {
-        "project": project,
-        "schema": "default",
-        "table": table,
-    })
+    r = real_tools.call(
+        "get_table_schema",
+        {
+            "project": project,
+            "schema": "default",
+            "table": table,
+        },
+    )
     p = _text_payload(r)
     assert "error" not in p, f"get_table_schema failed: {p.get('error')}"
     return _data(p)
@@ -79,7 +93,7 @@ class TestUpdateTableDescription:
     """update_table: description field."""
 
     def test_update_table_description(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """update description, then verify via get_table_schema."""
         project = real_config.default_project
@@ -90,12 +104,15 @@ class TestUpdateTableDescription:
         _create_simple_table(real_tools, project, table)
 
         new_desc = f"updated description for {table}"
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "description": new_desc,
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "description": new_desc,
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"update_table description failed: {p}"
         assert "description" in (p.get("data") or {}), (
@@ -111,7 +128,7 @@ class TestUpdateTableDescription:
         )
 
     def test_update_table_clear_description(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Empty string should clear the table description."""
         project = real_config.default_project
@@ -121,12 +138,15 @@ class TestUpdateTableDescription:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "description": "",
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "description": "",
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"update_table clear description failed: {p}"
 
@@ -142,7 +162,7 @@ class TestUpdateTableColumnDescription:
     """update_table: column description via columns.setComments."""
 
     def test_update_column_description(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Set a column description and verify via get_table_schema."""
         project = real_config.default_project
@@ -153,12 +173,15 @@ class TestUpdateTableColumnDescription:
         _create_simple_table(real_tools, project, table)
 
         col_desc = f"column comment for id in {table}"
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setComments": {"id": col_desc}},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setComments": {"id": col_desc}},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"update_table setComments failed: {p}"
 
@@ -171,7 +194,7 @@ class TestUpdateTableColumnDescription:
         )
 
     def test_update_nonexistent_column_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """setComments for a column that doesn't exist should fail."""
         project = real_config.default_project
@@ -181,12 +204,15 @@ class TestUpdateTableColumnDescription:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setComments": {"nonexistent_col_xyz": "some desc"}},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setComments": {"nonexistent_col_xyz": "some desc"}},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False, (
             f"Expected failure for non-existent column in setComments, got: {p}"
@@ -198,7 +224,7 @@ class TestUpdateTableLabels:
     """update_table: labels merge/replace/delete modes."""
 
     def test_update_table_labels_merge(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Merge mode: add new labels without removing existing ones."""
         project = real_config.default_project
@@ -208,25 +234,26 @@ class TestUpdateTableLabels:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": {"env": "test", "owner": "e2e"}, "mode": "merge"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": {"env": "test", "owner": "e2e"}, "mode": "merge"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"update_table labels merge failed: {p}"
         updated_data = p.get("data") or {}
         labels = updated_data.get("labels") or {}
-        assert labels.get("env") == "test", (
-            f"Expected labels.env='test', got: {labels}"
-        )
+        assert labels.get("env") == "test", f"Expected labels.env='test', got: {labels}"
         assert labels.get("owner") == "e2e", (
             f"Expected labels.owner='e2e', got: {labels}"
         )
 
     def test_update_table_labels_replace(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Replace mode: completely replaces existing labels."""
         project = real_config.default_project
@@ -237,20 +264,26 @@ class TestUpdateTableLabels:
         _create_simple_table(real_tools, project, table)
 
         # First: merge in an initial label
-        real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": {"old_key": "old_val"}, "mode": "merge"},
-        })
+        real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": {"old_key": "old_val"}, "mode": "merge"},
+            },
+        )
 
         # Replace with a completely new label set
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": {"new_key": "new_val"}, "mode": "replace"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": {"new_key": "new_val"}, "mode": "replace"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"update_table labels replace failed: {p}"
         updated_data = p.get("data") or {}
@@ -268,7 +301,7 @@ class TestUpdateTableAddColumn:
     """update_table: add new columns via columns.add."""
 
     def test_add_new_column(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Add a new nullable column and verify it appears in get_table_schema."""
         project = real_config.default_project
@@ -278,14 +311,23 @@ class TestUpdateTableAddColumn:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {
-                "add": [{"name": "extra_col", "type": "STRING", "description": "added column"}]
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {
+                    "add": [
+                        {
+                            "name": "extra_col",
+                            "type": "STRING",
+                            "description": "added column",
+                        }
+                    ]
+                },
             },
-        })
+        )
         p = _text_payload(r)
         assert p.get("success") is True, (
             f"columns.add failed: {p}. "
@@ -311,12 +353,15 @@ class TestUpdateTableErrors:
         project = real_config.default_project
         if not project:
             pytest.skip("default_project not configured")
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": "nonexistent_table_xyz_12345",
-            "description": "should fail",
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": "nonexistent_table_xyz_12345",
+                "description": "should fail",
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False, (
             f"Expected failure for non-existent table, got: {p}"
@@ -324,7 +369,7 @@ class TestUpdateTableErrors:
         assert p.get("error"), "Expected non-empty error message"
 
     def test_update_table_no_fields_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Calling update_table with no patch fields should return success=false."""
         project = real_config.default_project
@@ -334,19 +379,22 @@ class TestUpdateTableErrors:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            # No patch fields provided
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                # No patch fields provided
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False, (
             f"Expected failure when no updatable fields provided, got: {p}"
         )
 
     def test_update_table_with_stale_etag(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Using an explicitly wrong etag must cause success=false (OCC violation)."""
         project = real_config.default_project
@@ -357,13 +405,16 @@ class TestUpdateTableErrors:
         _create_simple_table(real_tools, project, table)
 
         # Use a clearly wrong etag
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "description": "should fail due to bad etag",
-            "etag": "STALE_ETAG_THAT_DOES_NOT_EXIST_12345",
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "description": "should fail due to bad etag",
+                "etag": "STALE_ETAG_THAT_DOES_NOT_EXIST_12345",
+            },
+        )
         p = _text_payload(r)
         # The OCC behavior depends on the server; it may succeed (auto-fetch) or fail
         # Some environments allow etag override without strict checking.
@@ -386,7 +437,7 @@ class TestUpdateTableLabelsDelete:
     """update_table: labels delete mode removes specific keys."""
 
     def test_labels_delete_removes_key(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Delete mode: removes specified label keys, leaving others intact."""
         project = real_config.default_project
@@ -397,27 +448,31 @@ class TestUpdateTableLabelsDelete:
         _create_simple_table(real_tools, project, table)
 
         # First: merge in two labels
-        real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": {"env": "test", "team": "data"}, "mode": "merge"},
-        })
+        real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": {"env": "test", "team": "data"}, "mode": "merge"},
+            },
+        )
 
         # Delete one label
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": {"env": ""}, "mode": "delete"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": {"env": ""}, "mode": "delete"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"labels delete failed: {p}"
         updated_data = p.get("data") or {}
         labels = updated_data.get("labels") or {}
-        assert "env" not in labels, (
-            f"'env' should be deleted, but labels={labels}"
-        )
+        assert "env" not in labels, f"'env' should be deleted, but labels={labels}"
         assert labels.get("team") == "data", (
             f"'team' should remain after delete, got: {labels}"
         )
@@ -431,7 +486,7 @@ class TestUpdateTableExpiration:
     """update_table: expiration policy (days / partitionDays)."""
 
     def test_set_table_expiration_days(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Set table-level expiration days."""
         project = real_config.default_project
@@ -441,15 +496,20 @@ class TestUpdateTableExpiration:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": {"days": 365},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": {"days": 365},
+            },
+        )
         p = _text_payload(r)
         if p.get("success") is not True:
-            pytest.skip(f"Expiration update not supported in this env: {p.get('error')}")
+            pytest.skip(
+                f"Expiration update not supported in this env: {p.get('error')}"
+            )
 
         updated_data = p.get("data") or {}
         expiration = updated_data.get("expiration") or {}
@@ -458,7 +518,7 @@ class TestUpdateTableExpiration:
         )
 
     def test_set_partition_expiration_days(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Set partition-level expiration days on a partitioned table."""
         project = real_config.default_project
@@ -467,29 +527,37 @@ class TestUpdateTableExpiration:
         table = _uniq("mcpe2etm_partexp")
         created_tables.append(table)
 
-        r = real_tools.call("create_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": [
-                {"name": "id", "type": "BIGINT"},
-                {"name": "val", "type": "STRING"},
-            ],
-            "partitionColumns": ["ds"],
-            "lifecycle": 1,
-        })
+        r = real_tools.call(
+            "create_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": [
+                    {"name": "id", "type": "BIGINT"},
+                    {"name": "val", "type": "STRING"},
+                ],
+                "partitionColumns": ["ds"],
+                "lifecycle": 1,
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"create_table failed: {p}"
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": {"partitionDays": 30},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": {"partitionDays": 30},
+            },
+        )
         p = _text_payload(r)
         if p.get("success") is not True:
-            pytest.skip(f"Partition expiration not supported in this env: {p.get('error')}")
+            pytest.skip(
+                f"Partition expiration not supported in this env: {p.get('error')}"
+            )
 
         updated_data = p.get("data") or {}
         expiration = updated_data.get("expiration") or {}
@@ -498,7 +566,7 @@ class TestUpdateTableExpiration:
         )
 
     def test_disable_expiration_with_zero_rejected(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Setting expiration.days=0 should be rejected (days must be positive integer).
 
@@ -513,20 +581,26 @@ class TestUpdateTableExpiration:
         _create_simple_table(real_tools, project, table)
 
         # First set a valid expiration
-        real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": {"days": 100},
-        })
+        real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": {"days": 100},
+            },
+        )
 
         # Setting days=0 must fail (days must be positive integer)
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": {"days": 0},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": {"days": 0},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False, (
             f"expiration.days=0 should be rejected (days must be positive), got: {p}"
@@ -541,7 +615,7 @@ class TestUpdateTableSetNullable:
     """update_table: columns.setNullable (REQUIRED → NULLABLE)."""
 
     def test_set_nullable_on_required_column(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Set a REQUIRED column to NULLABLE."""
         project = real_config.default_project
@@ -550,32 +624,38 @@ class TestUpdateTableSetNullable:
         table = _uniq("mcpe2etm_nullable")
         created_tables.append(table)
 
-        r = real_tools.call("create_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": [
-                {"name": "id", "type": "BIGINT", "notNull": True},
-                {"name": "name", "type": "STRING"},
-            ],
-            "transactional": True,
-            "lifecycle": 1,
-        })
+        r = real_tools.call(
+            "create_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": [
+                    {"name": "id", "type": "BIGINT", "notNull": True},
+                    {"name": "name", "type": "STRING"},
+                ],
+                "transactional": True,
+                "lifecycle": 1,
+            },
+        )
         p = _text_payload(r)
         if p.get("success") is not True:
             pytest.skip(f"transactional table not supported: {p.get('error')}")
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setNullable": ["id"]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setNullable": ["id"]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"setNullable failed: {p}"
 
     def test_set_nullable_nonexistent_column_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """setNullable for a column that doesn't exist should fail."""
         project = real_config.default_project
@@ -585,12 +665,15 @@ class TestUpdateTableSetNullable:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setNullable": ["nonexistent_col"]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setNullable": ["nonexistent_col"]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False, (
             f"Expected failure for nonexistent column in setNullable, got: {p}"
@@ -605,7 +688,7 @@ class TestUpdateTableAddColumnTypes:
     """update_table: columns.add with different data types."""
 
     def test_add_decimal_column(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Add a DECIMAL column via columns.add."""
         project = real_config.default_project
@@ -615,17 +698,20 @@ class TestUpdateTableAddColumnTypes:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"name": "price", "type": "DECIMAL(10,2)"}]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": [{"name": "price", "type": "DECIMAL(10,2)"}]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, f"add DECIMAL column failed: {p}"
 
     def test_add_array_column_with_schema_evolution(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Add ARRAY<STRING> column via columns.add.
 
@@ -640,19 +726,22 @@ class TestUpdateTableAddColumnTypes:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"name": "tags", "type": "ARRAY<STRING>"}]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": [{"name": "tags", "type": "ARRAY<STRING>"}]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, (
             f"ARRAY column add should succeed with schema evolution enabled, got: {p}"
         )
 
     def test_add_map_column_with_schema_evolution(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Add MAP<STRING,BIGINT> column via columns.add.
 
@@ -667,19 +756,24 @@ class TestUpdateTableAddColumnTypes:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"name": "metadata", "type": "MAP<STRING,BIGINT>"}]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {
+                    "add": [{"name": "metadata", "type": "MAP<STRING,BIGINT>"}]
+                },
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is True, (
             f"MAP column add should succeed with schema evolution enabled, got: {p}"
         )
 
     def test_add_duplicate_column_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Adding a column with a name that already exists must fail."""
         project = real_config.default_project
@@ -689,12 +783,15 @@ class TestUpdateTableAddColumnTypes:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"name": "id", "type": "BIGINT"}]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": [{"name": "id", "type": "BIGINT"}]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False, (
             f"Expected failure for duplicate column name, got: {p}"
@@ -704,7 +801,7 @@ class TestUpdateTableAddColumnTypes:
         )
 
     def test_add_column_with_invalid_type_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """Adding a column with an invalid/unknown type must fail."""
         project = real_config.default_project
@@ -714,16 +811,17 @@ class TestUpdateTableAddColumnTypes:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"name": "bad_col", "type": "NOT_A_REAL_TYPE"}]},
-        })
-        p = _text_payload(r)
-        assert p.get("success") is False, (
-            f"Expected failure for invalid type, got: {p}"
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": [{"name": "bad_col", "type": "NOT_A_REAL_TYPE"}]},
+            },
         )
+        p = _text_payload(r)
+        assert p.get("success") is False, f"Expected failure for invalid type, got: {p}"
 
 
 # ---------------------------------------------------------------------------
@@ -734,7 +832,7 @@ class TestUpdateTableInputValidation:
     """update_table: _normalize_patch validation errors (no server call needed)."""
 
     def test_description_null_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """description=None must fail."""
         project = real_config.default_project
@@ -744,18 +842,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "description": None,
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "description": None,
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "null" in (p.get("error") or "").lower()
 
     def test_description_non_string_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """description=123 (non-string) must fail."""
         project = real_config.default_project
@@ -765,18 +866,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "description": 123,
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "description": 123,
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "string" in (p.get("error") or "").lower()
 
     def test_labels_not_dict_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """labels must be a dict."""
         project = real_config.default_project
@@ -786,18 +890,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": "not_a_dict",
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": "not_a_dict",
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "labels" in (p.get("error") or "").lower()
 
     def test_labels_set_not_dict_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """labels.set must be a dict."""
         project = real_config.default_project
@@ -807,17 +914,20 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": "not_a_dict", "mode": "merge"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": "not_a_dict", "mode": "merge"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
 
     def test_labels_invalid_mode_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """labels.mode must be merge/replace/delete."""
         project = real_config.default_project
@@ -827,18 +937,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "labels": {"set": {"k": "v"}, "mode": "invalid_mode"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "labels": {"set": {"k": "v"}, "mode": "invalid_mode"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "mode" in (p.get("error") or "").lower()
 
     def test_expiration_not_dict_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """expiration must be a dict."""
         project = real_config.default_project
@@ -848,18 +961,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": 100,
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": 100,
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "expiration" in (p.get("error") or "").lower()
 
     def test_expiration_negative_days_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """expiration.days < 0 must fail."""
         project = real_config.default_project
@@ -869,18 +985,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": {"days": -1},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": {"days": -1},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert ">= 0" in (p.get("error") or "")
 
     def test_expiration_non_integer_days_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """expiration.days='abc' must fail."""
         project = real_config.default_project
@@ -890,18 +1009,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "expiration": {"days": "abc"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "expiration": {"days": "abc"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "integer" in (p.get("error") or "").lower()
 
     def test_columns_not_dict_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns must be a dict."""
         project = real_config.default_project
@@ -911,18 +1033,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": "not_a_dict",
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": "not_a_dict",
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "columns" in (p.get("error") or "").lower()
 
     def test_set_comments_not_dict_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.setComments must be a dict."""
         project = real_config.default_project
@@ -932,17 +1057,20 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setComments": "not_a_dict"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setComments": "not_a_dict"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
 
     def test_set_nullable_not_array_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.setNullable must be an array of strings."""
         project = real_config.default_project
@@ -952,17 +1080,20 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setNullable": "not_an_array"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setNullable": "not_an_array"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
 
     def test_set_nullable_nested_column_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.setNullable with dotted (nested) path must fail."""
         project = real_config.default_project
@@ -972,18 +1103,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"setNullable": ["addr.city"]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"setNullable": ["addr.city"]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "nested" in (p.get("error") or "").lower()
 
     def test_columns_add_not_array_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.add must be an array."""
         project = real_config.default_project
@@ -993,17 +1127,20 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": "not_an_array"},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": "not_an_array"},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
 
     def test_columns_add_entry_not_dict_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.add[i] must be an object."""
         project = real_config.default_project
@@ -1013,17 +1150,20 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": ["not_a_dict"]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": ["not_a_dict"]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
 
     def test_columns_add_missing_name_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.add[i] without 'name' must fail."""
         project = real_config.default_project
@@ -1033,18 +1173,21 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"type": "STRING"}]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": [{"type": "STRING"}]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "name" in (p.get("error") or "").lower()
 
     def test_columns_add_missing_type_returns_error(
-        self, real_tools: Tools, real_config: Any, created_tables: List[str]
+        self, real_tools: Tools, real_config: Any, created_tables: list[str]
     ) -> None:
         """columns.add[i] without 'type' must fail."""
         project = real_config.default_project
@@ -1054,14 +1197,15 @@ class TestUpdateTableInputValidation:
         created_tables.append(table)
         _create_simple_table(real_tools, project, table)
 
-        r = real_tools.call("update_table", {
-            "project": project,
-            "schema": "default",
-            "table": table,
-            "columns": {"add": [{"name": "new_col"}]},
-        })
+        r = real_tools.call(
+            "update_table",
+            {
+                "project": project,
+                "schema": "default",
+                "table": table,
+                "columns": {"add": [{"name": "new_col"}]},
+            },
+        )
         p = _text_payload(r)
         assert p.get("success") is False
         assert "type" in (p.get("error") or "").lower()
-
-

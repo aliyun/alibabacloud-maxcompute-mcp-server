@@ -12,6 +12,10 @@ See: https://help.aliyun.com/zh/sdk/developer-reference/v2-manage-python-access-
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from alibabacloud_credentials.client import Client as CredentialClient
 
 
 @dataclass(frozen=True)

@@ -3,23 +3,31 @@
 These cover the credential / endpoint-resolution / SDK-creation behaviour that
 used to live inside server.build_tools() before the named-config refactor.
 """
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from maxcompute_catalog_mcp.client_factory import ClientSet, build_client_set
+from maxcompute_catalog_mcp.client_factory import (
+    CatalogClientSet,
+    ClientSet,
+    build_catalog_client_set,
+    build_client_set,
+)
 from maxcompute_catalog_mcp.config import MaxComputeCatalogConfig
 
 
 def _cfg(**kw) -> MaxComputeCatalogConfig:
-    base = dict(
-        catalogapi_endpoint="https://catalog.example.com",
-        maxcompute_endpoint="https://mc.example.com",
-        access_key_id="AK", access_key_secret="SK",
-        default_project="proj", namespace_id="ns",
-    )
+    base = {
+        "catalogapi_endpoint": "https://catalog.example.com",
+        "maxcompute_endpoint": "https://mc.example.com",
+        "access_key_id": "AK",
+        "access_key_secret": "SK",
+        "default_project": "proj",
+        "namespace_id": "ns",
+    }
     base.update(kw)
     return MaxComputeCatalogConfig(**base)
 
@@ -40,6 +48,32 @@ def test_success(mock_creds, mock_mc, mock_sdk) -> None:
     mock_sdk.create.assert_called_once()
 
 
+@patch("maxcompute_catalog_mcp.client_factory.MaxComputeCatalogSdk")
+@patch("maxcompute_catalog_mcp.client_factory.get_credentials_client")
+def test_remote_client_set_does_not_build_compute_client(mock_creds, mock_sdk) -> None:
+    mock_creds.return_value = MagicMock()
+    mock_sdk.create.return_value = MagicMock()
+
+    client_set = build_catalog_client_set(_cfg())
+
+    assert isinstance(client_set, CatalogClientSet)
+    assert client_set.credential_client is mock_creds.return_value
+    mock_sdk.create.assert_called_once()
+
+
+@patch("maxcompute_catalog_mcp.client_factory.get_credentials_client")
+def test_remote_client_set_requires_catalog_endpoint(mock_creds) -> None:
+    mock_creds.return_value = MagicMock()
+
+    with pytest.raises(RuntimeError, match="without a CatalogAPI endpoint"):
+        build_catalog_client_set(
+            _cfg(
+                catalogapi_endpoint="",
+                maxcompute_endpoint="https://custom.example.com/api",
+            )
+        )
+
+
 @patch("maxcompute_catalog_mcp.client_factory.get_credentials_client")
 def test_credential_failure_raises_valueerror(mock_creds) -> None:
     mock_creds.side_effect = ValueError("no credentials")
@@ -51,7 +85,9 @@ def test_credential_failure_raises_valueerror(mock_creds) -> None:
 @patch("maxcompute_catalog_mcp.client_factory.MaxComputeCatalogSdk")
 @patch("maxcompute_catalog_mcp.client_factory.MaxComputeClient")
 @patch("maxcompute_catalog_mcp.client_factory.get_credentials_client")
-def test_resolves_endpoint_when_empty(mock_creds, mock_mc, mock_sdk, mock_resolve) -> None:
+def test_resolves_endpoint_when_empty(
+    mock_creds, mock_mc, mock_sdk, mock_resolve
+) -> None:
     mock_creds.return_value = MagicMock()
     mc_client = MagicMock()
     mc_client.odps_client = MagicMock()
@@ -72,7 +108,9 @@ def test_resolve_failure_raises_runtimeerror(mock_creds, mock_mc, mock_resolve) 
     mc_client = MagicMock()
     mc_client.odps_client = MagicMock()
     mock_mc.create.return_value = mc_client
-    mock_resolve.side_effect = ValueError("resolve failed")  # resolver raises ValueError
+    mock_resolve.side_effect = ValueError(
+        "resolve failed"
+    )  # resolver raises ValueError
 
     with pytest.raises(RuntimeError, match="Failed to resolve catalogapi endpoint"):
         build_client_set(_cfg(catalogapi_endpoint=""))
