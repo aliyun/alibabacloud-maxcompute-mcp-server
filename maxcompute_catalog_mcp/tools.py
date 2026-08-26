@@ -278,7 +278,7 @@ class Tools(
         """
         if project not in self._schema_enabled_cache:
             try:
-                resp = self.sdk.client.get_project(project_id=project)
+                resp = self._get_project(project)
                 m = resp.to_map() if hasattr(resp, "to_map") else resp
                 enabled = m.get("schemaEnabled")
                 # schemaEnabled absent on older API versions → assume 3-level

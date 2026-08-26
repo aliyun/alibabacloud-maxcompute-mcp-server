@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_PROJECT_VIEW_BASIC = "BASIC"
+
 
 class CatalogMixin:
     """Mixin providing catalog explorer and metadata search handlers.
@@ -35,6 +37,14 @@ class CatalogMixin:
 
         def _is_schema_enabled(self, project: str) -> bool: ...
 
+    def _get_project(self, project: str) -> Any:
+        """Fetch the public project view required by pyodps-catalog 0.4."""
+
+        return self.sdk.client.get_project(
+            project_id=project,
+            view=_PROJECT_VIEW_BASIC,
+        )
+
     def list_projects(self, args: dict[str, Any]) -> dict[str, Any]:
         page_size = opt_int(args, "pageSize", 100)
         token = opt_arg(args, "token")
@@ -46,7 +56,7 @@ class CatalogMixin:
 
     def get_project(self, args: dict[str, Any]) -> dict[str, Any]:
         project = require_arg(args, "project", "Project name cannot be empty")
-        resp = self.sdk.client.get_project(project_id=project)
+        resp = self._get_project(project)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
         return mcp_ok_result(m)
 

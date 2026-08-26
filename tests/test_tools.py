@@ -43,6 +43,10 @@ def test_get_project(tools: Tools) -> None:
     )
     data = _data(payload)
     assert data.get("projectId") == "p1"
+    tools.sdk.client.get_project.assert_called_once_with(
+        project_id="p1",
+        view="BASIC",
+    )
 
 
 def test_get_project_missing_project_raises() -> None:
@@ -852,7 +856,10 @@ def test_is_schema_enabled_caches_result() -> None:
     tools = Tools(sdk=sdk, default_project="p2", namespace_id="")
     assert tools._is_schema_enabled("p2") is False
     assert tools._is_schema_enabled("p2") is False
-    sdk.client.get_project.assert_called_once_with(project_id="p2")
+    sdk.client.get_project.assert_called_once_with(
+        project_id="p2",
+        view="BASIC",
+    )
 
 
 def test_is_schema_enabled_defaults_true_on_error() -> None:
