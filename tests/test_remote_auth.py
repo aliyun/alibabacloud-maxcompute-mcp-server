@@ -7,12 +7,15 @@ from dataclasses import dataclass, field
 from unittest.mock import AsyncMock
 
 import pytest
+from alibabacloud_tea_openapi.exceptions import ClientException
 
 from maxcompute_catalog_mcp.remote_auth import (
     AccessToken,
     CatalogAccessTokenProvider,
     CatalogMCPAccessTokenClient,
+    CatalogTokenRequestError,
 )
+from maxcompute_catalog_mcp.request_ids import request_id_from_exception
 
 
 def _valid_response(token: str = "mcpc_fixture-token") -> dict[str, object]:
@@ -206,3 +209,67 @@ def test_catalog_sdk_adapter_sanitizes_provider_and_http_errors() -> None:
         assert "fixture-secret" not in str(exc_info.value)
 
     asyncio.run(scenario())
+
+
+def test_catalog_sdk_adapter_preserves_only_safe_provider_request_id() -> None:
+    """Catalog failures retain correlation metadata without leaking SDK details."""
+
+    async def scenario() -> None:
+        catalog_client = AsyncMock()
+        catalog_client.call_api_async.side_effect = ClientException(
+            status_code=403,
+            code="Forbidden",
+            message="fixture-secret-ak-and-token",
+            request_id="catalog-request-403",
+        )
+        provider = CatalogAccessTokenProvider(
+            client=CatalogMCPAccessTokenClient(catalog_client),
+        )
+
+        with pytest.raises(CatalogTokenRequestError) as exc_info:
+            await provider.get_access_token()
+
+        assert exc_info.value.request_id == "catalog-request-403"
+        assert str(exc_info.value) == (
+            "CatalogAPI MCP token request failed (request_id=catalog-request-403)"
+        )
+        assert "fixture-secret" not in str(exc_info.value)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"requestId": "catalog-lower-camel"}, "catalog-lower-camel"),
+        ({"RequestId": "catalog-upper-camel"}, "catalog-upper-camel"),
+        (
+            {"request_id": "bad\nvalue", "requestId": "catalog-fallback"},
+            "catalog-fallback",
+        ),
+        ({"message": "no correlation metadata"}, None),
+    ],
+)
+def test_provider_request_id_extraction_supports_explicit_sdk_data_shapes(
+    data: dict[str, object],
+    expected: str | None,
+) -> None:
+    """Known Alibaba Cloud SDK data keys are accepted without parsing messages."""
+
+    error = RuntimeError("provider detail must stay private")
+    error.data = data
+
+    assert request_id_from_exception(error) == expected
+
+
+def test_provider_request_id_extraction_tolerates_hostile_exception_properties() -> (
+    None
+):
+    """A broken external exception object cannot mask the sanitized failure."""
+
+    class HostileProviderError(RuntimeError):
+        @property
+        def request_id(self) -> str:
+            raise RuntimeError("property access failed")
+
+    assert request_id_from_exception(HostileProviderError()) is None

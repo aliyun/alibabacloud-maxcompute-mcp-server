@@ -10,6 +10,8 @@ from typing import Any, Protocol
 from alibabacloud_tea_util import models as util_models
 from maxcompute_tea_openapi import models as openapi_models
 
+from .request_ids import request_id_from_exception, sanitize_request_id
+
 _MCP_ACCESS_TOKEN_PATH = "/api/catalog/v1alpha/mcpAccessToken"
 _EXPECTED_SCOPES = ["maxcompute:read", "maxcompute:sql"]
 _TOKEN_LIFETIME_SECONDS = 300
@@ -23,6 +25,17 @@ class CatalogTokenClient(Protocol):
     """Issue one token through the authenticated CatalogAPI path."""
 
     async def issue_access_token(self) -> object: ...
+
+
+class CatalogTokenRequestError(RuntimeError):
+    """Sanitized CatalogAPI issuance failure with optional correlation metadata."""
+
+    def __init__(self, request_id: str | None = None) -> None:
+        self.request_id = sanitize_request_id(request_id)
+        message = "CatalogAPI MCP token request failed"
+        if self.request_id is not None:
+            message = f"{message} (request_id={self.request_id})"
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -73,8 +86,8 @@ class CatalogMCPAccessTokenClient:
                 request,
                 runtime,
             )
-        except Exception:  # noqa: BLE001 -- sanitize the external SDK boundary.
-            raise RuntimeError("CatalogAPI MCP token request failed") from None
+        except Exception as error:  # noqa: BLE001 -- sanitize the SDK boundary.
+            raise CatalogTokenRequestError(request_id_from_exception(error)) from None
 
 
 class CatalogAccessTokenProvider:
@@ -119,8 +132,10 @@ class CatalogAccessTokenProvider:
     async def _renew(self) -> AccessToken:
         try:
             payload = await self._client.issue_access_token()
-        except Exception:  # noqa: BLE001 -- CatalogTokenClient is a provider boundary.
-            raise RuntimeError("CatalogAPI MCP token request failed") from None
+        except CatalogTokenRequestError:
+            raise
+        except Exception as error:  # noqa: BLE001 -- provider boundary.
+            raise CatalogTokenRequestError(request_id_from_exception(error)) from None
         return self._parse_access_token(payload)
 
     @staticmethod

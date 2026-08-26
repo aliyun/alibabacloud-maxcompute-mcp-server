@@ -307,6 +307,13 @@ remote URL 必须是无 userinfo、query、fragment 且路径严格为 `/mcp` �
 代理拒绝 redirect、忽略环境 HTTP proxy，并以 single-flight 方式通过 CatalogAPI
 续期短期 bearer token。CatalogAPI 接口无业务 body，scope 和 TTL 由服务端固定。
 
+CatalogAPI 或 Gateway 返回 Request ID 时，remote 模式会在不暴露凭证的前提下保留该
+排查信息：启动失败会把 Request ID 写入 stderr；JSON-RPC 错误会写入
+`error.data.request_id`；`isError: true` 的工具结果如果还没有
+`structuredContent.request_id`，则写入
+`_meta["com.aliyun.maxcompute/requestId"]`。HTTP 失败会把状态码和 Request ID 记录到
+stderr，成功的 MCP 响应体保持不变。
+
 ### 运行
 
 #### 强制 local 模式，stdio
