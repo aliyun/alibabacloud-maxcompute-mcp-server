@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/lang-English-blue)](README.md)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README_ZH.md)
 
-阿里云 [MaxCompute](https://www.aliyun.com/product/odps) 的本地 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 启动器。它既可以用 `local` 模式运行原有 SDK 实现，也可以用 `remote` 模式作为托管版 MaxCompute MCP 服务的透明 stdio 代理。
+阿里云 [MaxCompute](https://www.aliyun.com/product/odps) 的本地 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) 启动器。它既可以用 `local` 模式运行原有 SDK 实现，也可以用 `remote` 模式作为托管版 MaxCompute MCP 服务的透明 stdio 或 Streamable HTTP 代理。
 
 > [!IMPORTANT]
 > 推荐优先使用 MaxCompute Remote MCP Server。请先阅读托管版 Remote MCP
@@ -21,7 +21,7 @@
 ## 能力概览
 
 - **兼容原有配置**：通过已有 FE/Catalog endpoint 判断 Region 和 public/VPC 网络；简单 `region` + `network` 配置无需 Region 表即可生成 FE、Catalog 和 MCP endpoint。
-- **透明 remote 模式**：将 stdio MCP 消息原样转发到托管版 Streamable HTTP endpoint，不重建或重命名远端工具。
+- **透明 remote 模式**：将 stdio 和 Streamable HTTP MCP 消息转发到托管版 Streamable HTTP endpoint，不重建或重命名远端工具，并保留 MRTR、progress notification 和未来 MCP 字段。
 - **当前协议兼容**：使用 MCP Python SDK 2.x，保留现代 `2026-07-28` 请求的 metadata 与路由 Header，同时兼容 legacy initialize。
 - **标准 CatalogAPI 鉴权**：remote 代理使用现有凭证 Provider 对无 body 的 `mcpAccessToken` 请求签名，续期时重新取得当前 AK/STS/ECS RAM Role 凭证。
 - **凭证隔离**：只把短期 `mcpc_` bearer 发给 Gateway，不在 MCP 消息或 URL 中发送 AK Secret / STS 凭证；选定 remote 后失败也绝不 fallback 到本地 SDK。
@@ -55,15 +55,16 @@ MaxCompute Remote MCP Server。Remote MCP 服务减少本地运行环境和 MCP
 
 为保持老配置升级兼容，启动器默认使用 `default`。它从所选老配置的 FE 和 Catalog
 endpoint 判断 Region 和 public/VPC 网络，也支持显式 `region` + `network` 简单配置。
-本进程使用 stdio 且能够确定 Region/网络时，先通过 CatalogAPI 签发 token，再对唯一的
-地域 MCP endpoint 完成经过认证的 `initialize`；token 签发或 remote 初始化失败时
-fallback 到原有 local 实现。`--mode local` 可以显式固定原实现。
+能够确定 Region/网络时，本进程先通过 CatalogAPI 签发 token，再对唯一的地域 MCP
+endpoint 完成经过认证的 `initialize`。stdio 和 Streamable HTTP 使用相同的启动选型；
+token 签发或 remote 初始化失败时 fallback 到原有 local 实现。`--mode local` 可以
+显式固定原实现。
 
 | 模式 | MCP 路径 | 后端 | 本进程对外传输 |
 | --- | --- | --- | --- |
-| `default` | 启动时先探测 remote，再选择一种路径 | remote 优先；初始化失败使用本地 SDK | stdio；非 stdio 保持 local |
+| `default` | 启动时先探测 remote，再选择一种路径 | remote 优先；初始化失败使用本地 SDK | stdio 或 Streamable HTTP |
 | `local` | MCP Client → 本进程 → 本地 SDK | MaxCompute SDK / CatalogAPI | stdio 或 Streamable HTTP |
-| `remote` | MCP Client → 本进程 → 托管 Gateway | Remote MCP Streamable HTTP | 仅 stdio |
+| `remote` | MCP Client → 本进程 → 托管 Gateway | Remote MCP Streamable HTTP | stdio 或 Streamable HTTP |
 
 显式 `remote` 模式 fail closed：CatalogAPI 签发、MCP initialize、token 续期或
 Gateway 传输失败都会终止远端流程。`default` 只在选型前 fallback；一旦认证初始化
@@ -82,7 +83,7 @@ Gateway 传输失败都会终止远端流程。`default` 只在选型前 fallbac
 - remote 代理调用 CatalogAPI 的标准签名接口取得 300 秒 `mcpc_` token；不保存
   refresh token
 - lockfile 固定 MCP Python SDK 2.x，同时支持现代 `2026-07-28` 与协商后的 legacy
-  stdio client
+  client
 
 ### 安装
 
@@ -277,8 +278,8 @@ endpoint 选择公网 MCP，已识别的 VPC/内网 endpoint 选择 VPC MCP。�
 与已识别 endpoint 冲突则视为配置错误。
 
 VPC 配置绝不选择公网 MCP，也不跨 Region。只有自定义/历史 endpoint 且无法验证
-Region/网络、FE/Catalog 证据冲突，或进程使用本地 HTTP transport 时，`default` 保持
-原 local 实现；显式 `remote` 模式 fail closed。
+Region/网络或 FE/Catalog 证据冲突时，`default` 保持原 local 实现；显式 `remote`
+模式 fail closed。
 
 MCP 域名只按 Region 决定：中国内地 Region（`cn-*`，但不包括 `cn-hongkong`）使用
 `mcp`，`cn-hongkong` 和其他海外 Region 使用 `mcp-intl`。这不是账号站点探测；
@@ -306,6 +307,13 @@ CatalogAPI 签发 token 的链路不进入 RAM OAuth。生成的 endpoint 只在
 remote URL 必须是无 userinfo、query、fragment 且路径严格为 `/mcp` 的 resource。
 代理拒绝 redirect、忽略环境 HTTP proxy，并以 single-flight 方式通过 CatalogAPI
 续期短期 bearer token。CatalogAPI 接口无业务 body，scope 和 TTL 由服务端固定。
+
+Streamable HTTP 代理转发 `POST`、`GET` 和 `DELETE`，同时支持 JSON 和 Server-Sent
+Events（SSE）。代理保留请求 body 字节、非错误 remote 消息、session 与断点续传 Header、
+所有 `Mcp-*` 扩展 Header、MRTR state/input 字段、progress notification 以及未知的未来
+MCP 字段。stdio bridge 可能重新编码 JSON，但会保留 MCP 字段和值。代理不转发下游
+`Authorization` 和 `Cookie` Header，而是使用当前 CatalogAPI token，并在访问 Gateway
+前校验 `Host` 和 `Origin`。
 
 CatalogAPI 或 Gateway 返回 Request ID 时，remote 模式会在不暴露凭证的前提下保留该
 排查信息：启动失败会把 Request ID 写入 stderr；JSON-RPC 错误会写入
@@ -337,7 +345,20 @@ uv run alibabacloud-maxcompute-mcp-server --config /path/to/config.json
 按规则生成的地域 endpoint 在 `default` 下无需增加站点字段。仅在需要覆盖默认入口时增加
 `--mode remote --remote-url https://<REMOTE_MCP_HOST>/mcp`。
 
-remote 模式会拒绝 `--transport http` 和 `--transport streamable-http`。
+#### remote 模式，Streamable HTTP 代理
+
+```bash
+uv run alibabacloud-maxcompute-mcp-server \
+  --config /path/to/config.json \
+  --mode remote \
+  --transport streamable-http \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+listener 地址为 `http://127.0.0.1:8000/mcp`。除非其他可信主机必须访问本进程，否则请
+保留默认的 loopback 监听地址。`default` 下可以省略 `--mode remote`；启动探测成功时
+使用 remote 代理，remote 初始化失败时才 fallback 到 local Streamable HTTP 实现。
 
 ### MCP 工具
 
@@ -442,8 +463,9 @@ args 中。
 
 #### Streamable HTTP
 
-该 listener 仅在 local 模式可用。按上文启动后，将 MCP Client 地址指向
-`http://127.0.0.1:8000/mcp`。
+按上文启动 local 或 remote Streamable HTTP，再将 MCP Client 地址指向
+`http://127.0.0.1:8000/mcp`。`default` 下本地 URL 不变，由进程在启动时选择 remote
+代理或 local SDK 实现。
 
 ### 开发
 

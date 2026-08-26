@@ -7,7 +7,7 @@
 [![English](https://img.shields.io/badge/lang-English-blue)](README.md)
 [![中文](https://img.shields.io/badge/lang-中文-red)](README_ZH.md)
 
-A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launcher for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It can run the original SDK-backed server (`local` mode) or act as a transparent stdio proxy to the hosted MaxCompute MCP service (`remote` mode).
+A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launcher for Alibaba Cloud [MaxCompute](https://www.alibabacloud.com/product/maxcompute). It can run the original SDK-backed server (`local` mode) or act as a transparent stdio or Streamable HTTP proxy to the hosted MaxCompute MCP service (`remote` mode).
 
 > [!IMPORTANT]
 > MaxCompute Remote MCP Server is the recommended way to use MaxCompute MCP.
@@ -22,7 +22,7 @@ A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launche
 ## Features
 
 - **Backward-compatible configuration**: existing FE/Catalog endpoints determine Region and public/VPC network; simple `region` + `network` config derives FE, Catalog, and MCP endpoints without a Region registry.
-- **Transparent remote mode**: stdio MCP messages are relayed to the hosted Streamable HTTP endpoint without rebuilding or renaming the remote tool surface.
+- **Transparent remote mode**: stdio and Streamable HTTP MCP messages are relayed to the hosted Streamable HTTP endpoint without rebuilding or renaming the remote tool surface. MRTR, progress notifications, and future MCP fields remain intact.
 - **Current protocol support**: MCP Python SDK 2.x preserves modern `2026-07-28` request metadata and routing headers while retaining legacy initialize compatibility.
 - **Standard CatalogAPI authentication**: the remote proxy signs the bodyless `mcpAccessToken` operation with the existing credential provider and resolves current AK/STS/ECS RAM Role credentials again on renewal.
 - **Credential isolation**: only a short-lived `mcpc_` bearer is sent to the Gateway; AccessKey secrets and STS credentials never enter MCP messages or URLs, and a selected remote session never falls back to the local SDK.
@@ -61,16 +61,17 @@ incidents, production outages, vulnerabilities, or confidential data cases.
 The launcher defaults to `default` for upgrades from old configurations. It
 derives the Region and public/VPC network from the selected legacy FE and
 Catalog endpoints, or uses an explicit `region` plus `network` simple config.
-When this process uses stdio and Region/network can be determined, it obtains a
-CatalogAPI token and authenticates the one regional MCP endpoint with
-`initialize`. Token issuance or remote initialization failure falls back to the
-original local implementation. Use `--mode local` to pin that implementation.
+When Region/network can be determined, the process obtains a CatalogAPI token
+and authenticates the one regional MCP endpoint with `initialize`. This startup
+selection applies to both stdio and Streamable HTTP. Token issuance or remote
+initialization failure falls back to the original local implementation. Use
+`--mode local` to pin that implementation.
 
 | Mode | MCP path | Backend | Transport exposed by this process |
 | --- | --- | --- | --- |
-| `default` | Probe remote at startup, then select one path | Remote MCP first; local SDK on initialization failure | stdio; non-stdio stays local |
+| `default` | Probe remote at startup, then select one path | Remote MCP first; local SDK on initialization failure | stdio or Streamable HTTP |
 | `local` | MCP client → this process → local SDK | MaxCompute SDK / CatalogAPI | stdio or Streamable HTTP |
-| `remote` | MCP client → this process → hosted Gateway | Remote MCP Streamable HTTP | stdio only |
+| `remote` | MCP client → this process → hosted Gateway | Remote MCP Streamable HTTP | stdio or Streamable HTTP |
 
 Explicit `remote` mode is fail-closed: CatalogAPI issuance, MCP initialize,
 token renewal, or Gateway transport failures terminate the remote flow.
@@ -93,7 +94,7 @@ The launcher needs:
 - The remote proxy obtains a 300-second `mcpc_` token through the standard
   signed CatalogAPI operation and stores no refresh token.
 - MCP Python SDK 2.x is installed from the lockfile; modern `2026-07-28` and
-  negotiated legacy stdio clients are both supported.
+  negotiated legacy clients are both supported.
 
 ### Installation
 
@@ -299,9 +300,9 @@ remote, and explicit `region`/`network` values that contradict a recognized
 endpoint are rejected as invalid configuration.
 
 A VPC configuration never selects public MCP or crosses Regions. Custom or
-historical endpoints with no verifiable Region/network, conflicting FE/Catalog
-evidence, or a local HTTP transport stay on legacy local behavior under
-`default`; explicit `remote` mode fails closed.
+historical endpoints with no verifiable Region/network or conflicting
+FE/Catalog evidence stay on legacy local behavior under `default`; explicit
+`remote` mode fails closed.
 
 Endpoint naming is determined only by Region: Mainland China Regions (`cn-*`,
 except `cn-hongkong`) use `mcp`, while `cn-hongkong` and every other overseas
@@ -335,6 +336,15 @@ fragment. The proxy rejects redirects, ignores ambient HTTP proxy variables,
 and renews the short-lived bearer through CatalogAPI single-flight. The
 CatalogAPI operation has no business body; scope and TTL are server-owned.
 
+The Streamable HTTP proxy forwards `POST`, `GET`, and `DELETE`, including JSON
+and Server-Sent Events (SSE). It preserves request body bytes, non-error remote
+messages, session and resumption headers, all `Mcp-*` extension headers, MRTR
+state and input fields, progress notifications, and unknown future MCP fields.
+The stdio bridge may re-encode JSON, but it preserves MCP fields and values. The
+proxy discards downstream `Authorization` and `Cookie` headers, replaces
+authorization with the current CatalogAPI token, and validates `Host` and
+`Origin` before contacting the Gateway.
+
 When CatalogAPI or the Gateway provides a Request ID, remote-mode failures
 surface that correlation value without exposing credentials: startup failures
 include it in the stderr diagnostic, JSON-RPC errors include
@@ -367,7 +377,22 @@ Derived regional endpoints need no site field under `default`. Add
 `--mode remote --remote-url https://<REMOTE_MCP_HOST>/mcp` only to override the
 default entry.
 
-Remote mode rejects `--transport http` and `--transport streamable-http`.
+#### Remote mode, Streamable HTTP proxy
+
+```bash
+uv run alibabacloud-maxcompute-mcp-server \
+  --config /path/to/config.json \
+  --mode remote \
+  --transport streamable-http \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+The listener exposes `http://127.0.0.1:8000/mcp`. Keep the default loopback
+binding unless another trusted host must connect to this process. You can omit
+`--mode remote` under `default`; the process uses the same startup probe and
+falls back to the local Streamable HTTP implementation only if remote
+initialization fails.
 
 ### MCP tools
 
@@ -473,8 +498,9 @@ tokens, or bearer tokens in MCP client arguments.
 
 #### Streamable HTTP
 
-This listener is available only in local mode. Start the server (see above),
-then point your MCP client at `http://127.0.0.1:8000/mcp`.
+Start either local or remote Streamable HTTP as shown above, then point your MCP
+client at `http://127.0.0.1:8000/mcp`. Under `default`, the same local URL stays
+stable while startup selects the remote proxy or local SDK implementation.
 
 ### Development
 

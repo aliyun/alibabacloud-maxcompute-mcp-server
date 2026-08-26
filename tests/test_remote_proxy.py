@@ -8,7 +8,7 @@ import logging
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import anyio
 import httpx2 as httpx
@@ -630,6 +630,104 @@ def test_bridge_preserves_non_requests_and_unversioned_notifications() -> None:
     assert response.metadata is None
     assert notification.metadata is None
     assert invalid_version.metadata is None
+
+
+def test_stdio_bridge_preserves_modern_mrtr_fields_without_interpreting_them() -> None:
+    """The stdio relay treats current and future MRTR payload fields as opaque."""
+    bridge = ProtocolMetadataBridge()
+    params = {
+        "name": "maxcompute_generate_sql",
+        "arguments": {"question": "revenue?"},
+        "requestState": "opaque.sealed.state",
+        "inputResponses": {
+            "business_clarifications": {
+                "action": "accept",
+                "content": {"time_semantics": "calendar month"},
+            }
+        },
+        "_meta": {
+            PROTOCOL_VERSION_META_KEY: MODERN_PROTOCOL_VERSION,
+            "io.modelcontextprotocol/clientCapabilities": {"elicitation": {"form": {}}},
+        },
+        "futureRequestField": {"must": "survive"},
+    }
+    request = mcp_types.JSONRPCRequest(
+        jsonrpc="2.0",
+        id=31,
+        method="tools/call",
+        params=params,
+    )
+    outbound = SessionMessage(request)
+
+    assert bridge.prepare_outbound(outbound) is outbound
+    assert outbound.message.params == params
+
+    result = {
+        "content": None,
+        "resultType": "input_required",
+        "requestState": "next.opaque.state",
+        "inputRequests": {
+            "business_clarifications": {
+                "type": "object",
+                "futureKeyword": {"nested": [1, True, None]},
+            }
+        },
+        "futureResultField": {"must": "survive"},
+    }
+    inbound = SessionMessage(
+        mcp_types.JSONRPCResponse(jsonrpc="2.0", id=31, result=result)
+    )
+
+    assert bridge.observe_inbound(inbound) is inbound
+    assert inbound.message.result == result
+
+
+def test_stdio_relay_forwards_mrtr_progress_and_input_required_in_order() -> None:
+    """The stdio relay does not filter MRTR progress or final result messages."""
+
+    async def scenario() -> None:
+        progress_params = {
+            "progressToken": "mrtr-round-2",
+            "progress": 1,
+            "total": 2,
+            "message": "working",
+            "_meta": {"futureProgressField": {"must": "survive"}},
+        }
+        progress = SessionMessage(
+            mcp_types.JSONRPCNotification(
+                jsonrpc="2.0",
+                method="notifications/progress",
+                params=progress_params,
+            )
+        )
+        result = {
+            "content": None,
+            "resultType": "input_required",
+            "requestState": "next.opaque.state",
+            "inputRequests": {
+                "business_clarifications": {
+                    "type": "object",
+                    "futureKeyword": {"nested": [1, True, None]},
+                }
+            },
+            "futureResultField": {"must": "survive"},
+        }
+        input_required = SessionMessage(
+            mcp_types.JSONRPCResponse(jsonrpc="2.0", id=31, result=result)
+        )
+
+        async def source():
+            yield progress
+            yield input_required
+
+        target = MagicMock(send=AsyncMock())
+        await relay_server_messages(source(), target, ProtocolMetadataBridge())
+
+        assert target.send.await_args_list == [call(progress), call(input_required)]
+        assert progress.message.params == progress_params
+        assert input_required.message.result == result
+
+    asyncio.run(scenario())
 
 
 def test_modern_bridge_preserves_existing_headers_and_omits_invalid_name() -> None:

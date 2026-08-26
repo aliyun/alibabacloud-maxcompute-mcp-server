@@ -347,6 +347,59 @@ async def _run_forced_remote_stdio(
     await _run_remote_proxy(config, token_provider)
 
 
+def _run_remote_http(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+    *,
+    host: str,
+    port: int,
+) -> None:
+    """Run the transparent Streamable HTTP-to-Streamable HTTP proxy."""
+
+    from .remote_http_proxy import run_remote_http_proxy
+
+    run_remote_http_proxy(
+        config,
+        token_provider,
+        host=host,
+        port=port,
+    )
+
+
+def _run_forced_remote_http(
+    config: RemoteRuntimeConfig,
+    token_provider: CatalogAccessTokenProvider,
+    *,
+    host: str,
+    port: int,
+) -> None:
+    """Initialize and run Remote HTTP mode without a Local fallback."""
+
+    asyncio.run(_initialize_remote_mcp(config, token_provider))
+    _run_remote_http(
+        config,
+        token_provider,
+        host=host,
+        port=port,
+    )
+
+
+def _log_remote_fallback(error: Exception) -> None:
+    request_id = request_id_from_exception(error)
+    if request_id is None:
+        _LOGGER.warning(
+            "Remote MCP initialization failed; falling back to local mode (%s)",
+            type(error).__name__,
+        )
+    else:
+        _LOGGER.warning(
+            "Remote MCP initialization failed; falling back to local mode "
+            "(%s, request_id=%s)",
+            type(error).__name__,
+            request_id,
+        )
+
+
 async def _run_default_stdio(
     runtime_config: RuntimeConfig,
     config_path: str | None,
@@ -362,25 +415,45 @@ async def _run_default_stdio(
             )
             await _initialize_remote_mcp(remote, token_provider)
         except Exception as error:  # noqa: BLE001 -- default mode must fall back.
-            request_id = request_id_from_exception(error)
-            if request_id is None:
-                _LOGGER.warning(
-                    "Remote MCP initialization failed; falling back to local mode (%s)",
-                    type(error).__name__,
-                )
-            else:
-                _LOGGER.warning(
-                    "Remote MCP initialization failed; falling back to local mode "
-                    "(%s, request_id=%s)",
-                    type(error).__name__,
-                    request_id,
-                )
+            _log_remote_fallback(error)
         else:
             await _run_remote_proxy(remote, token_provider)
             return
 
     tools = build_tools(config_path, profile=runtime_config.profile)
     await _run_stdio(tools)
+
+
+def _run_default_http(
+    runtime_config: RuntimeConfig,
+    config_path: str | None,
+    *,
+    host: str,
+    port: int,
+) -> None:
+    """Select Remote HTTP once at startup, otherwise serve the Local MCP."""
+
+    remote = runtime_config.remote
+    if remote is not None:
+        try:
+            token_provider = build_remote_token_provider(
+                config_path,
+                runtime_config.profile,
+            )
+            asyncio.run(_initialize_remote_mcp(remote, token_provider))
+        except Exception as error:  # noqa: BLE001 -- default mode must fall back.
+            _log_remote_fallback(error)
+        else:
+            _run_remote_http(
+                remote,
+                token_provider,
+                host=host,
+                port=port,
+            )
+            return
+
+    tools = build_tools(config_path, profile=runtime_config.profile)
+    _run_http(tools, host=host, port=port)
 
 
 def _run_http(tools: Tools, host: str, port: int) -> None:
@@ -426,14 +499,11 @@ def main() -> None:
             mode=options.mode,
             remote_url=options.remote_url,
             profile=options.profile,
-            allow_remote=options.transport == "stdio",
         )
     except (TypeError, ValueError) as error:
         sys.exit(f"Invalid MCP runtime config: {error}")
 
     if runtime_config.mode is RuntimeMode.REMOTE:
-        if options.transport != "stdio":
-            sys.exit("Remote MCP proxy mode supports only stdio transport")
         if runtime_config.remote is None:
             sys.exit("Remote MCP proxy configuration is missing")
         try:
@@ -444,18 +514,34 @@ def main() -> None:
         except RuntimeError:
             sys.exit("Remote MCP token provider initialization failed")
         try:
-            asyncio.run(
-                _run_forced_remote_stdio(
+            if options.transport in ("http", "streamable-http"):
+                _run_forced_remote_http(
                     runtime_config.remote,
                     token_provider,
+                    host=options.host,
+                    port=options.port,
                 )
-            )
+            else:
+                asyncio.run(
+                    _run_forced_remote_stdio(
+                        runtime_config.remote,
+                        token_provider,
+                    )
+                )
         except RemoteInitializationError as error:
             sys.exit(str(error))
         return
 
     if runtime_config.mode is RuntimeMode.DEFAULT and runtime_config.remote is not None:
-        asyncio.run(_run_default_stdio(runtime_config, options.config_path))
+        if options.transport in ("http", "streamable-http"):
+            _run_default_http(
+                runtime_config,
+                options.config_path,
+                host=options.host,
+                port=options.port,
+            )
+        else:
+            asyncio.run(_run_default_stdio(runtime_config, options.config_path))
         return
 
     tools = build_tools(options.config_path, profile=runtime_config.profile)

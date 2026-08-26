@@ -425,8 +425,8 @@ def test_explicit_local_mode_preserves_legacy_runtime(tmp_path: Path) -> None:
     assert config.remote is None
 
 
-def test_non_stdio_default_selection_preserves_local_server(tmp_path: Path) -> None:
-    """Existing HTTP self-hosting cannot be replaced by the stdio-only relay."""
+def test_default_remote_selection_is_transport_agnostic(tmp_path: Path) -> None:
+    """Default mode keeps its Remote candidate for Streamable HTTP."""
     path = _write_config(
         tmp_path,
         _legacy_config(
@@ -437,18 +437,22 @@ def test_non_stdio_default_selection_preserves_local_server(tmp_path: Path) -> N
     config = load_runtime_config(path, allow_remote=False)
 
     assert config.mode is RuntimeMode.DEFAULT
-    assert config.remote is None
+    assert config.remote is not None
+    assert config.remote.url == ("https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp")
 
 
-def test_explicit_remote_non_stdio_is_rejected(tmp_path: Path) -> None:
+def test_explicit_remote_is_transport_agnostic(tmp_path: Path) -> None:
     document = _legacy_config(
         "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
     )
     document["mode"] = "remote"
     path = _write_config(tmp_path, document)
 
-    with pytest.raises(ValueError, match="only available with stdio"):
-        load_runtime_config(path, allow_remote=False)
+    config = load_runtime_config(path, allow_remote=False)
+
+    assert config.mode is RuntimeMode.REMOTE
+    assert config.remote is not None
+    assert config.remote.url == ("https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp")
 
 
 def test_named_profile_drives_network_and_region_selection(tmp_path: Path) -> None:

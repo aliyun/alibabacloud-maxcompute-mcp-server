@@ -37,6 +37,7 @@ dependencies = [
   "maxcompute_tea_util>=0.0.1",
   "mcp>=2.0.0,<3",     # Official MCP Python SDK with 2026-07-28 support
   "httpx2>=2.12.0,<3", # MCP 2.x Streamable HTTP client dependency
+  "starlette>=1.6.0,<2", # ASGI surface for the transparent HTTP proxy
   "uvicorn>=0.52.4",   # ASGI server for Streamable HTTP mode
   # Security floors for runtime transitive dependencies. These must be public
   # Requires-Dist entries because PyPI installers do not read [tool.uv].

@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `default` and `remote` modes now expose a transparent Streamable HTTP proxy
+  for `POST`, `GET`, and `DELETE` with JSON, SSE, session resumption, and
+  per-request token lookup and single-flight CatalogAPI renewal.
+- Remote forwarding preserves MRTR state and input fields, progress
+  notifications, unknown future MCP payload fields, and `Mcp-*` extension
+  headers. Non-error Streamable HTTP messages remain byte-for-byte unchanged.
+
 ## [0.1.5] - 2026-08-26
 
 ### Added
