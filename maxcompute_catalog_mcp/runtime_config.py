@@ -298,10 +298,10 @@ def load_runtime_config(
     )
     if requested_mode is RuntimeMode.LOCAL:
         return RuntimeConfig(mode=RuntimeMode.LOCAL, profile=resolved_profile)
-    if not allow_remote:
-        if requested_mode is RuntimeMode.REMOTE:
-            raise ValueError("remote proxy mode is only available with stdio")
-        return RuntimeConfig(mode=requested_mode, profile=resolved_profile)
+    # ``allow_remote`` remains accepted for callers of older releases, but
+    # transport selection no longer changes runtime-mode semantics. Remote and
+    # default modes support both stdio and Streamable HTTP.
+    _ = allow_remote
 
     if (
         requested_mode is RuntimeMode.DEFAULT

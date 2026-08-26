@@ -26,9 +26,12 @@ from maxcompute_catalog_mcp.server import (
     _initialize_remote_mcp,
     _parse_args,
     _parse_server_options,
+    _run_default_http,
     _run_default_stdio,
+    _run_forced_remote_http,
     _run_forced_remote_stdio,
     _run_http,
+    _run_remote_http,
     _run_stdio,
     build_remote_token_provider,
     build_tools,
@@ -192,6 +195,69 @@ def test_main_remote_mode_builds_token_provider_but_not_local_tools(
     probe_remote_mock.assert_awaited_once()
     run_remote_mock.assert_awaited_once()
     assert run_remote_mock.await_args.args[1] is token_provider
+
+
+def test_main_remote_streamable_http_builds_no_local_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remote HTTP startup probes auth and then serves the transparent proxy."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "mode": "remote",
+                "remote": {"url": "http://127.0.0.1:8080/mcp"},
+                "maxcompute": {
+                    "maxcompute_endpoint": (
+                        "https://service.cn-hangzhou.maxcompute.aliyun.com/api"
+                    ),
+                    "catalogapi_endpoint": "https://catalog.example.com",
+                    "accessKeyId": "fixture-ak",
+                    "accessKeySecret": "fixture-sk",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "alibabacloud-maxcompute-mcp-server",
+            "--config",
+            str(config_path),
+            "--transport",
+            "streamable-http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8123",
+        ],
+    )
+    token_provider = MagicMock()
+
+    with (
+        patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock,
+        patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=token_provider,
+        ),
+        patch(
+            "maxcompute_catalog_mcp.server._run_forced_remote_http",
+        ) as run_remote_http_mock,
+    ):
+        main()
+
+    build_tools_mock.assert_not_called()
+    run_remote_http_mock.assert_called_once()
+    selected, selected_provider = run_remote_http_mock.call_args.args[:2]
+    assert selected.url == "http://127.0.0.1:8080/mcp"
+    assert selected_provider is token_provider
+    assert run_remote_http_mock.call_args.kwargs == {
+        "host": "127.0.0.1",
+        "port": 8123,
+    }
 
 
 class TestDefaultMode:
@@ -401,6 +467,161 @@ class TestDefaultMode:
             asyncio.run(_run_default_stdio(self._runtime(), None))
 
         build_tools_mock.assert_not_called()
+
+
+class TestDefaultHttpMode:
+    @staticmethod
+    def _runtime() -> RuntimeConfig:
+        return RuntimeConfig(
+            mode=RuntimeMode.DEFAULT,
+            profile="daily",
+            remote=RemoteRuntimeConfig(
+                url="https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp",
+            ),
+        )
+
+    def test_successful_initialize_selects_remote_http_proxy(self) -> None:
+        runtime = self._runtime()
+        provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+            ) as probe_mock,
+            patch(
+                "maxcompute_catalog_mcp.server._run_remote_http",
+            ) as remote_http_mock,
+            patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock,
+        ):
+            _run_default_http(
+                runtime,
+                "/fake/config.json",
+                host="127.0.0.1",
+                port=8123,
+            )
+
+        probe_mock.assert_awaited_once_with(runtime.remote, provider)
+        remote_http_mock.assert_called_once_with(
+            runtime.remote,
+            provider,
+            host="127.0.0.1",
+            port=8123,
+        )
+        build_tools_mock.assert_not_called()
+
+    def test_initialize_failure_falls_back_to_local_http(self) -> None:
+        runtime = self._runtime()
+        provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
+        local_tools = MagicMock()
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("gateway unavailable"),
+            ),
+            patch("maxcompute_catalog_mcp.server._run_remote_http") as remote_http_mock,
+            patch(
+                "maxcompute_catalog_mcp.server.build_tools",
+                return_value=local_tools,
+            ),
+            patch("maxcompute_catalog_mcp.server._run_http") as local_http_mock,
+        ):
+            _run_default_http(
+                runtime,
+                None,
+                host="127.0.0.1",
+                port=8123,
+            )
+
+        remote_http_mock.assert_not_called()
+        local_http_mock.assert_called_once_with(
+            local_tools,
+            host="127.0.0.1",
+            port=8123,
+        )
+
+    def test_remote_runtime_failure_after_selection_does_not_fall_back(self) -> None:
+        runtime = self._runtime()
+        provider = MagicMock()
+        provider.get_access_token = AsyncMock(return_value="catalog-token")
+        with (
+            patch(
+                "maxcompute_catalog_mcp.server.build_remote_token_provider",
+                return_value=provider,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._probe_remote_mcp",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.server._run_remote_http",
+                side_effect=RuntimeError("remote stream lost"),
+            ),
+            patch("maxcompute_catalog_mcp.server.build_tools") as build_tools_mock,
+            pytest.raises(RuntimeError, match="remote stream lost"),
+        ):
+            _run_default_http(
+                runtime,
+                None,
+                host="127.0.0.1",
+                port=8123,
+            )
+
+        build_tools_mock.assert_not_called()
+
+
+def test_forced_remote_http_initialize_failure_is_fail_closed() -> None:
+    config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
+    provider = MagicMock()
+    provider.get_access_token = AsyncMock(return_value="catalog-token")
+    with (
+        patch(
+            "maxcompute_catalog_mcp.server._probe_remote_mcp",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("unauthorized"),
+        ),
+        patch("maxcompute_catalog_mcp.server._run_remote_http") as remote_http_mock,
+        pytest.raises(RemoteInitializationError, match="initialization failed"),
+    ):
+        _run_forced_remote_http(
+            config,
+            provider,
+            host="127.0.0.1",
+            port=8123,
+        )
+
+    remote_http_mock.assert_not_called()
+
+
+def test_run_remote_http_delegates_to_transport_implementation() -> None:
+    config = RemoteRuntimeConfig(url="https://gateway.example.com/mcp")
+    provider = MagicMock()
+    with patch(
+        "maxcompute_catalog_mcp.remote_http_proxy.run_remote_http_proxy"
+    ) as run_mock:
+        _run_remote_http(
+            config,
+            provider,
+            host="127.0.0.1",
+            port=8123,
+        )
+
+    run_mock.assert_called_once_with(
+        config,
+        provider,
+        host="127.0.0.1",
+        port=8123,
+    )
 
 
 def test_forced_remote_initialize_failure_is_fail_closed() -> None:
