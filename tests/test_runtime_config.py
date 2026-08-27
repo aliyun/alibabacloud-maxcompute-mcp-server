@@ -609,6 +609,43 @@ def test_explicit_remote_rejects_unsafe_targets(
         load_runtime_config(path)
 
 
+def test_unrecognized_remote_url_stays_fail_closed(tmp_path: Path) -> None:
+    document = _legacy_config(
+        "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+    )
+    document.update(
+        {
+            "mode": "remote",
+            "remote": {"url": "https://mcp-slot.internal.example.net/mcp"},
+        }
+    )
+    path = _write_config(tmp_path, document)
+
+    with pytest.raises(ValueError, match="cannot be verified"):
+        load_runtime_config(path)
+
+
+def test_unrecognized_remote_url_opt_in_proceeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("MAXCOMPUTE_ALLOW_UNVERIFIED_REMOTE_URL", "1")
+    url = "https://mcp-slot.internal.example.net/mcp"
+    document = _legacy_config(
+        "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+    )
+    document.update({"mode": "remote", "remote": {"url": url}})
+    path = _write_config(tmp_path, document)
+
+    config = load_runtime_config(path)
+
+    assert config.mode is RuntimeMode.REMOTE
+    assert config.remote is not None
+    assert config.remote.url == url
+    assert "network type cannot be verified" in capsys.readouterr().err
+
+
 def test_explicit_loopback_remote_is_available_for_local_integration(
     tmp_path: Path,
 ) -> None:
