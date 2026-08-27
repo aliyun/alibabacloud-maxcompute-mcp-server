@@ -79,6 +79,12 @@ token renewal, or Gateway transport failures terminate the remote flow.
 has selected remote, a later remote-session failure never invokes local SDK
 tools dynamically.
 
+A remote hostname outside the known endpoint registry is rejected, because its
+network type cannot be proven from the hostname alone. Set
+`MAXCOMPUTE_ALLOW_UNVERIFIED_REMOTE_URL=1` to proceed explicitly for such a
+target; the launcher prints a warning and the default fail-closed behavior
+stays unchanged.
+
 ### Requirements
 
 The launcher needs:

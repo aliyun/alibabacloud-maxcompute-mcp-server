@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -238,6 +239,15 @@ def _validate_network_compatibility(
         return
     remote = _mcp_endpoint_identity(remote_url)
     if remote is None:
+        if os.getenv("MAXCOMPUTE_ALLOW_UNVERIFIED_REMOTE_URL"):
+            # The remote host does not match the known endpoint registry,
+            # so its network type cannot be proven from the hostname alone.
+            # Stay fail-closed by default; proceed only on explicit opt-in.
+            sys.stderr.write(
+                "warning: remote MCP URL network type cannot be verified; "
+                "proceeding because MAXCOMPUTE_ALLOW_UNVERIFIED_REMOTE_URL is set\n"
+            )
+            return
         raise ValueError("remote MCP URL network type cannot be verified")
     if remote.network is not maxcompute.network:
         raise ValueError(
