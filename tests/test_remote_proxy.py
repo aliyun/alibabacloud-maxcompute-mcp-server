@@ -19,9 +19,11 @@ from mcp.shared.message import ClientMessageMetadata, SessionMessage
 from maxcompute_catalog_mcp.remote_proxy import (
     DynamicBearerAuth,
     ProtocolMetadataBridge,
+    RelayFirstExchangeStalled,
     RemoteMCPInitializationFailure,
     RemoteRequestIdTracker,
     _run_remote_proxy_with_provider,
+    _watch_first_exchange,
     probe_remote_mcp,
     relay_client_messages,
     relay_server_messages,
@@ -954,5 +956,91 @@ def test_streamable_http_400_jsonrpc_error_returns_without_timeout() -> None:
             assert received.message.error.data == {
                 "request_id": "gateway-invalid-request-1"
             }
+
+    asyncio.run(scenario())
+
+
+def test_bridge_stall_detection_only_watches_first_exchange() -> None:
+    """Pending tracking arms on requests and disarms after any response."""
+
+    bridge = ProtocolMetadataBridge()
+    assert bridge.stalled_request_id(0.0) is None
+
+    initialize = mcp_types.JSONRPCRequest(
+        jsonrpc="2.0",
+        id=1,
+        method="initialize",
+        params={"protocolVersion": "2025-06-18"},
+    )
+    bridge.prepare_outbound(SessionMessage(initialize))
+    assert bridge.stalled_request_id(0.0) == 1
+
+    response = mcp_types.JSONRPCResponse(
+        jsonrpc="2.0",
+        id=1,
+        result={"protocolVersion": "2025-06-18"},
+    )
+    bridge.observe_inbound(SessionMessage(response))
+    assert bridge.first_response_observed is True
+
+    later = mcp_types.JSONRPCRequest(
+        jsonrpc="2.0",
+        id=2,
+        method="tools/call",
+        params={"name": "example"},
+    )
+    bridge.prepare_outbound(SessionMessage(later))
+    assert bridge.stalled_request_id(0.0) is None
+
+
+def test_watch_first_exchange_fails_fast_on_silent_stall() -> None:
+    """A dropped initial request surfaces a JSON-RPC error and aborts."""
+
+    async def scenario() -> None:
+        bridge = ProtocolMetadataBridge()
+        initialize = mcp_types.JSONRPCRequest(
+            jsonrpc="2.0",
+            id=1,
+            method="initialize",
+            params={"protocolVersion": "2025-06-18"},
+        )
+        bridge.prepare_outbound(SessionMessage(initialize))
+        bridge._pending_requests[1] -= 60.0
+
+        local_write = AsyncMock()
+        with (
+            patch(
+                "maxcompute_catalog_mcp.remote_proxy."
+                "_RELAY_FIRST_RESPONSE_TIMEOUT_SECONDS",
+                30.0,
+            ),
+            patch(
+                "maxcompute_catalog_mcp.remote_proxy._RELAY_WATCHDOG_POLL_SECONDS",
+                0,
+            ),
+            pytest.raises(RelayFirstExchangeStalled, match="id=1"),
+        ):
+            await _watch_first_exchange(local_write, bridge)
+
+        local_write.send.assert_awaited_once()
+        sent = local_write.send.call_args.args[0]
+        assert isinstance(sent.message, mcp_types.JSONRPCError)
+        assert sent.message.id == 1
+        assert sent.message.error.code == -32000
+
+    asyncio.run(scenario())
+
+
+def test_watch_first_exchange_returns_once_session_is_live() -> None:
+    """After the first response the watchdog exits without error."""
+
+    async def scenario() -> None:
+        bridge = ProtocolMetadataBridge()
+        bridge.first_response_observed = True
+        local_write = AsyncMock()
+
+        await _watch_first_exchange(local_write, bridge)
+
+        local_write.send.assert_not_awaited()
 
     asyncio.run(scenario())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator, AsyncIterable
 from dataclasses import replace
 from typing import Any, Protocol
@@ -25,6 +26,9 @@ from .runtime_config import RemoteRuntimeConfig
 
 _REMOTE_INITIALIZATION_TIMEOUT_SECONDS = 10.0
 _REMOTE_CONNECT_TIMEOUT_SECONDS = 30.0
+_RELAY_FIRST_RESPONSE_TIMEOUT_SECONDS = 30.0
+_RELAY_WATCHDOG_POLL_SECONDS = 1.0
+_REMOTE_REQUEST_ERROR_CODE = -32000
 _REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_META_KEY = "com.aliyun.maxcompute/requestId"
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +49,10 @@ class RemoteMCPInitializationFailure(RuntimeError):
         if self.request_id is not None:
             message = f"{message} (request_id={self.request_id})"
         super().__init__(message)
+
+
+class RelayFirstExchangeStalled(RuntimeError):
+    """The first forwarded request never received any remote response."""
 
 
 class RemoteRequestIdTracker:
@@ -129,6 +137,24 @@ class ProtocolMetadataBridge:
         self._initialize_request_id: int | str | None = None
         self._legacy_protocol_version: str | None = None
         self._request_ids = request_ids
+        self._pending_requests: dict[int | str, float] = {}
+        self.first_response_observed = False
+
+    def stalled_request_id(self, timeout: float) -> int | str | None:
+        """Return the oldest unanswered request ID once it exceeds the timeout.
+
+        Only the first exchange is watched: once any remote response has been
+        observed the session is proven live and later long-running tool calls
+        are not bounded here.
+        """
+
+        if self.first_response_observed:
+            return None
+        now = time.monotonic()
+        for request_id, forwarded_at in self._pending_requests.items():
+            if now - forwarded_at >= timeout:
+                return request_id
+        return None
 
     def prepare_outbound(self, message: SessionMessage) -> SessionMessage:
         """Attach transport metadata while preserving the JSON-RPC object."""
@@ -139,6 +165,9 @@ class ProtocolMetadataBridge:
             mcp_types.JSONRPCRequest | mcp_types.JSONRPCNotification,
         ):
             return message
+
+        if isinstance(payload, mcp_types.JSONRPCRequest):
+            self._pending_requests.setdefault(payload.id, time.monotonic())
 
         if (
             isinstance(payload, mcp_types.JSONRPCRequest)
@@ -169,6 +198,11 @@ class ProtocolMetadataBridge:
         """Remember protocol state and add HTTP correlation to failures."""
 
         payload = message.message
+        if isinstance(payload, mcp_types.JSONRPCResponse | mcp_types.JSONRPCError):
+            self.first_response_observed = True
+            if payload.id is not None:
+                self._pending_requests.pop(payload.id, None)
+
         if (
             isinstance(payload, mcp_types.JSONRPCResponse)
             and payload.id == self._initialize_request_id
@@ -318,6 +352,44 @@ async def relay_server_messages(
         await target.send(bridge.observe_inbound(message))
 
 
+async def _watch_first_exchange(
+    local_write: Any,
+    bridge: ProtocolMetadataBridge,
+) -> None:
+    """Fail fast when the first forwarded request is silently dropped.
+
+    Some transport races cancel the initial POST inside the Streamable HTTP
+    client without ever notifying the stdio peer, leaving the MCP client
+    hanging on an unanswered initialize. When no response arrives within the
+    budget, surface a JSON-RPC error to the peer and abort the relay instead
+    of stalling silently.
+    """
+
+    while not bridge.first_response_observed:
+        await anyio.sleep(_RELAY_WATCHDOG_POLL_SECONDS)
+        stalled_id = bridge.stalled_request_id(_RELAY_FIRST_RESPONSE_TIMEOUT_SECONDS)
+        if stalled_id is None:
+            continue
+        _LOGGER.error(
+            "Remote MCP relay stall: request id=%r received no response within %.0fs",
+            stalled_id,
+            _RELAY_FIRST_RESPONSE_TIMEOUT_SECONDS,
+        )
+        error = mcp_types.JSONRPCError(
+            jsonrpc="2.0",
+            id=stalled_id,
+            error=mcp_types.ErrorData(
+                code=_REMOTE_REQUEST_ERROR_CODE,
+                message="remote relay delivered no response for this request",
+            ),
+        )
+        await local_write.send(SessionMessage(error))
+        raise RelayFirstExchangeStalled(
+            f"request id={stalled_id!r} received no remote response within "
+            f"{_RELAY_FIRST_RESPONSE_TIMEOUT_SECONDS:.0f}s"
+        )
+
+
 async def relay_bidirectional(
     local_read: Any,
     local_write: Any,
@@ -346,6 +418,7 @@ async def relay_bidirectional(
             remote_read,
             local_write,
         )
+        tasks.start_soon(_watch_first_exchange, local_write, bridge)
 
 
 async def run_remote_proxy(
