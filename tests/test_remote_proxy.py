@@ -126,6 +126,10 @@ def test_remote_proxy_uses_exact_hardened_http_client_and_relay_wiring() -> None
         assert kwargs["auth"]._provider is provider
         assert kwargs["follow_redirects"] is False
         assert kwargs["trust_env"] is False
+        timeout = kwargs["timeout"]
+        assert isinstance(timeout, httpx.Timeout)
+        assert timeout.connect == 30.0
+        assert timeout.read is None
         response_hooks = kwargs["event_hooks"]["response"]
         assert len(response_hooks) == 1
         assert isinstance(response_hooks[0].__self__, RemoteRequestIdTracker)

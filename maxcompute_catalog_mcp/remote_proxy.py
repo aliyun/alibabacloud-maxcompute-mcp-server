@@ -24,6 +24,7 @@ from .request_ids import sanitize_request_id
 from .runtime_config import RemoteRuntimeConfig
 
 _REMOTE_INITIALIZATION_TIMEOUT_SECONDS = 10.0
+_REMOTE_CONNECT_TIMEOUT_SECONDS = 30.0
 _REQUEST_ID_HEADER = "X-Request-ID"
 _REQUEST_ID_META_KEY = "com.aliyun.maxcompute/requestId"
 _LOGGER = logging.getLogger(__name__)
@@ -270,6 +271,7 @@ async def probe_remote_mcp(
                     auth=DynamicBearerAuth(token_provider),
                     event_hooks={"response": [request_ids.observe_response]},
                     follow_redirects=False,
+                    timeout=httpx.Timeout(_REMOTE_INITIALIZATION_TIMEOUT_SECONDS),
                     trust_env=False,
                 ) as mcp_client,
                 streamable_http_client(
@@ -368,6 +370,10 @@ async def _run_remote_proxy_with_provider(
             auth=DynamicBearerAuth(token_provider),
             event_hooks={"response": [request_ids.observe_response]},
             follow_redirects=False,
+            # Long-running MCP tool calls (SQL synchronous waits, KB/LLM
+            # answers) exceed any small default; only the connect phase is
+            # bounded here, matching the Streamable HTTP reverse proxy.
+            timeout=httpx.Timeout(_REMOTE_CONNECT_TIMEOUT_SECONDS, read=None),
             trust_env=False,
         ) as mcp_client,
         stdio_server() as (
