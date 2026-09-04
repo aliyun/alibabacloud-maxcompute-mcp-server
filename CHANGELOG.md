@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- VPC endpoint derivation no longer emits an internal-only hostname that a
+  customer VPC cannot route to. A `service.<region>-vpc...` FE endpoint now
+  derives `catalogapi.<region>-vpc...`, and `network: "vpc"` synthesizes the
+  matching `-vpc` FE and CatalogAPI endpoints. Previously both paths produced
+  a hostname on a different network plane, so remote startup failed with
+  `Remote MCP token issuance failed during initialization` after a
+  five-second connect timeout.
+- An FE endpoint that is neither public nor VPC no longer derives a CatalogAPI
+  endpoint. Remote startup now fails closed with an explicit error unless
+  `catalogapi_endpoint` (or `MAXCOMPUTE_CATALOG_API_ENDPOINT`) is configured.
+
 ## [0.1.7] - 2026-08-27
 
 ### Added

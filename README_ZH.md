@@ -267,15 +267,19 @@ Streamable HTTP 模式下，所有客户端共享同一个当前配置，一个�
 
 | 服务 | public 规则 | VPC 规则 |
 | --- | --- | --- |
-| FE | `https://service.<region>.maxcompute.aliyun.com/api` | `https://service.<region>-intranet.maxcompute.aliyun-inc.com/api` |
-| CatalogAPI | `https://catalogapi.<region>.maxcompute.aliyun.com` | `https://catalogapi.<region>-intranet.maxcompute.aliyun-inc.com` |
+| FE | `https://service.<region>.maxcompute.aliyun.com/api` | `https://service.<region>-vpc.maxcompute.aliyun-inc.com/api` |
+| CatalogAPI | `https://catalogapi.<region>.maxcompute.aliyun.com` | `https://catalogapi.<region>-vpc.maxcompute.aliyun-inc.com` |
 | 中国内地 Region MCP（`cn-*`，不含 `cn-hongkong`） | `https://mcp.<region>.maxcompute.aliyun.com/mcp` | `https://mcp.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
 | 海外 Region MCP（含 `cn-hongkong`） | `https://mcp-intl.<region>.maxcompute.aliyun.com/mcp` | `https://mcp-intl.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
 
 对于老配置，能够识别的 FE 和 Catalog endpoint 都会提供 Region/网络证据：公网
-endpoint 选择公网 MCP，已识别的 VPC/内网 endpoint 选择 VPC MCP。两者都能识别时，
+endpoint 选择公网 MCP，已识别的 VPC endpoint 选择 VPC MCP。两者都能识别时，
 必须指向相同 Region 和网络；二者冲突时绝不选择 remote。显式 `region`/`network`
 与已识别 endpoint 冲突则视为配置错误。
+
+CatalogAPI 只从公网或 VPC 形态的 FE endpoint 推导。其它形态的 FE 不会推导出
+CatalogAPI，remote 启动会 fail closed 并给出明确报错，除非显式配置
+`catalogapi_endpoint`（或 `MAXCOMPUTE_CATALOG_API_ENDPOINT`）。
 
 VPC 配置绝不选择公网 MCP，也不跨 Region。只有自定义/历史 endpoint 且无法验证
 Region/网络或 FE/Catalog 证据冲突时，`default` 保持原 local 实现；显式 `remote`
