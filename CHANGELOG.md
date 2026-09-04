@@ -19,6 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - An FE endpoint that is neither public nor VPC no longer derives a CatalogAPI
   endpoint. Remote startup now fails closed with an explicit error unless
   `catalogapi_endpoint` (or `MAXCOMPUTE_CATALOG_API_ENDPOINT`) is configured.
+- Local-mode `list_tables` and `get_partition_info` now pass the `view` and
+  `query` arguments that pyodps-catalog 0.4.0 requires. Omitting them raised a
+  `TypeError` at call time, which surfaced as a tool error in local mode while
+  every mocked unit test stayed green, because the shared fake client accepts
+  any keyword arguments. A new signature-contract test binds the arguments the
+  launcher passes to the installed SDK signature so this drift fails in CI.
 
 ### Changed
 
