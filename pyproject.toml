@@ -1,6 +1,6 @@
 [project]
 name = "alibabacloud-maxcompute-mcp-server"
-version = "0.1.7"
+version = "0.1.8"
 description = "MCP (Model Context Protocol) server for Alibaba Cloud MaxCompute — list projects/schemas/tables, search metadata, execute SQL, and manage instances via Catalog API and PyODPS."
 readme = "README.md"
 license = "Apache-2.0"
