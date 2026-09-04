@@ -49,7 +49,7 @@ _PUBLIC_MAXCOMPUTE_HOST = re.compile(
 )
 _VPC_MAXCOMPUTE_HOST = re.compile(
     r"^service\.(?P<region>[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)"
-    r"(?P<suffix>-intranet|-vpc)\.maxcompute\.aliyun-inc\.com$"
+    r"-vpc\.maxcompute\.aliyun-inc\.com$"
 )
 
 
@@ -136,11 +136,7 @@ def _catalogapi_endpoint_for_standard_fe(maxcompute_endpoint: str) -> str:
         region = public_match.group("region")
         return f"https://catalogapi.{region}.maxcompute.aliyun.com"
     vpc_match = _VPC_MAXCOMPUTE_HOST.fullmatch(host)
-    # Only the -vpc suffix is a customer VPC endpoint. The -intranet suffix is
-    # a separate internal network plane that a customer VPC cannot route to, so
-    # deriving it here would send CatalogAPI calls to an unreachable host and
-    # surface only as an opaque token-issuance failure.
-    if vpc_match is not None and vpc_match.group("suffix") == "-vpc":
+    if vpc_match is not None:
         region = vpc_match.group("region")
         return f"https://catalogapi.{region}-vpc.maxcompute.aliyun-inc.com"
     return ""

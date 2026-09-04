@@ -20,6 +20,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   endpoint. Remote startup now fails closed with an explicit error unless
   `catalogapi_endpoint` (or `MAXCOMPUTE_CATALOG_API_ENDPOINT`) is configured.
 
+### Changed
+
+- Endpoint recognition no longer treats the internal-plane hostname suffix as a
+  VPC endpoint; only the `-vpc` suffix is recognized. Internal-plane endpoints
+  now contribute no Region/network evidence, so they neither synthesize a VPC
+  MCP endpoint nor mask a conflicting configuration: `default` mode stays on
+  the local implementation and explicit `remote` mode fails closed with a clear
+  error. A configuration that mixes an unrecognized FE endpoint with a
+  recognized CatalogAPI endpoint now derives the remote endpoint from the
+  recognized evidence, because remote mode never uses the FE endpoint.
+
 ## [0.1.7] - 2026-08-27
 
 ### Added

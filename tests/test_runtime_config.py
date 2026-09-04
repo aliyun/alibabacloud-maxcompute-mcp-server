@@ -83,9 +83,10 @@ def test_legacy_vpc_config_uses_only_same_region_vpc_mcp(
     )
 
 
-def test_legacy_intranet_fe_and_catalog_endpoints_select_vpc_mcp(
+def test_legacy_intranet_endpoints_contribute_no_network_evidence(
     tmp_path: Path,
 ) -> None:
+    """Internal-plane endpoints are outside the public endpoint registry."""
     path = _write_config(
         tmp_path,
         _legacy_config(
@@ -99,10 +100,7 @@ def test_legacy_intranet_fe_and_catalog_endpoints_select_vpc_mcp(
     config = load_runtime_config(path)
 
     assert config.mode is RuntimeMode.DEFAULT
-    assert config.remote is not None
-    assert config.remote.url == (
-        "https://mcp.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/mcp"
-    )
+    assert config.remote is None
 
 
 def test_legacy_catalog_endpoint_can_supply_network_when_fe_is_custom(
@@ -135,7 +133,7 @@ def test_legacy_vpc_catalog_endpoint_can_supply_network_when_fe_is_custom(
         _legacy_config(
             "https://custom-fe.example.com/api",
             catalogapi_endpoint=(
-                "https://catalogapi.cn-hongkong-intranet.maxcompute.aliyun-inc.com"
+                "https://catalogapi.cn-hongkong-vpc.maxcompute.aliyun-inc.com"
             ),
         ),
     )
@@ -155,9 +153,9 @@ def test_conflicting_legacy_fe_and_catalog_networks_do_not_guess(
     path = _write_config(
         tmp_path,
         _legacy_config(
-            "https://service.cn-hangzhou.maxcompute.aliyun.com/api",
+            "https://service.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/api",
             catalogapi_endpoint=(
-                "https://catalogapi.cn-hangzhou-intranet.maxcompute.aliyun-inc.com"
+                "https://catalogapi.cn-hangzhou.maxcompute.aliyun.com"
             ),
         ),
     )
