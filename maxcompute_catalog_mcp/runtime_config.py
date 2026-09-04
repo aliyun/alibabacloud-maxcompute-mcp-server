@@ -60,16 +60,14 @@ _PUBLIC_MAXCOMPUTE_HOST = re.compile(
 )
 _VPC_MAXCOMPUTE_HOST = re.compile(
     rf"^service\.(?P<region>{_REGION_PATTERN})"
-    r"(?:-intranet|-vpc)"
-    r"\.maxcompute\.aliyun-inc\.com$"
+    r"-vpc\.maxcompute\.aliyun-inc\.com$"
 )
 _PUBLIC_CATALOGAPI_HOST = re.compile(
     rf"^catalogapi\.(?P<region>{_REGION_PATTERN})\.maxcompute\.aliyun\.com$"
 )
 _VPC_CATALOGAPI_HOST = re.compile(
     rf"^catalogapi\.(?P<region>{_REGION_PATTERN})"
-    r"(?:-intranet|-vpc)"
-    r"\.maxcompute\.aliyun-inc\.com$"
+    r"-vpc\.maxcompute\.aliyun-inc\.com$"
 )
 _PUBLIC_MCP_HOST = re.compile(
     rf"^mcp(?:-intl)?\.(?P<region>{_REGION_PATTERN})\.maxcompute\.aliyun\.com$"

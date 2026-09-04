@@ -60,8 +60,14 @@ def test_config_repr_redacts_credentials() -> None:
             "https://catalogapi.cn-hangzhou.maxcompute.aliyun.com",
         ),
         (
+            "https://service.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/api",
+            "https://catalogapi.ap-southeast-1-vpc.maxcompute.aliyun-inc.com",
+        ),
+        # The -intranet plane is internal and unreachable from a customer VPC,
+        # so it is never derived; an explicit catalogapi_endpoint is required.
+        (
             "https://service.ap-southeast-1-intranet.maxcompute.aliyun-inc.com/api",
-            "https://catalogapi.ap-southeast-1-intranet.maxcompute.aliyun-inc.com",
+            "",
         ),
     ],
 )
@@ -379,8 +385,8 @@ def test_load_config_missing_endpoint_raises(tmp_path: Path) -> None:
         (
             "eu-central-1",
             "vpc",
-            "https://service.eu-central-1-intranet.maxcompute.aliyun-inc.com/api",
-            "https://catalogapi.eu-central-1-intranet.maxcompute.aliyun-inc.com",
+            "https://service.eu-central-1-vpc.maxcompute.aliyun-inc.com/api",
+            "https://catalogapi.eu-central-1-vpc.maxcompute.aliyun-inc.com",
         ),
     ],
 )
@@ -452,10 +458,10 @@ def test_simple_region_network_environment_config_synthesizes_vpc_endpoints(
 
     assert cfg.network == "vpc"
     assert cfg.maxcompute_endpoint == (
-        "https://service.ap-southeast-1-intranet.maxcompute.aliyun-inc.com/api"
+        "https://service.ap-southeast-1-vpc.maxcompute.aliyun-inc.com/api"
     )
     assert cfg.catalogapi_endpoint == (
-        "https://catalogapi.ap-southeast-1-intranet.maxcompute.aliyun-inc.com"
+        "https://catalogapi.ap-southeast-1-vpc.maxcompute.aliyun-inc.com"
     )
 
 
@@ -666,10 +672,10 @@ class TestLoadConfigs:
         assert default_name == "hz-vpc"
         assert configs["hz-vpc"].network == "vpc"
         assert configs["hz-vpc"].maxcompute_endpoint == (
-            "https://service.cn-hangzhou-intranet.maxcompute.aliyun-inc.com/api"
+            "https://service.cn-hangzhou-vpc.maxcompute.aliyun-inc.com/api"
         )
         assert configs["hz-vpc"].catalogapi_endpoint == (
-            "https://catalogapi.cn-hangzhou-intranet.maxcompute.aliyun-inc.com"
+            "https://catalogapi.cn-hangzhou-vpc.maxcompute.aliyun-inc.com"
         )
 
     def test_multi_named_configs(self, tmp_path: Path) -> None:

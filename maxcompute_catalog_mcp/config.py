@@ -49,7 +49,7 @@ _PUBLIC_MAXCOMPUTE_HOST = re.compile(
 )
 _VPC_MAXCOMPUTE_HOST = re.compile(
     r"^service\.(?P<region>[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)"
-    r"(?:-intranet|-vpc)\.maxcompute\.aliyun-inc\.com$"
+    r"-vpc\.maxcompute\.aliyun-inc\.com$"
 )
 
 
@@ -110,10 +110,10 @@ def _resolve_simple_endpoints(
             )
         else:
             maxcompute_endpoint = maxcompute_endpoint or (
-                f"https://service.{region}-intranet.maxcompute.aliyun-inc.com/api"
+                f"https://service.{region}-vpc.maxcompute.aliyun-inc.com/api"
             )
             catalogapi_endpoint = catalogapi_endpoint or (
-                f"https://catalogapi.{region}-intranet.maxcompute.aliyun-inc.com"
+                f"https://catalogapi.{region}-vpc.maxcompute.aliyun-inc.com"
             )
     if not catalogapi_endpoint and maxcompute_endpoint:
         catalogapi_endpoint = _catalogapi_endpoint_for_standard_fe(maxcompute_endpoint)
@@ -121,7 +121,12 @@ def _resolve_simple_endpoints(
 
 
 def _catalogapi_endpoint_for_standard_fe(maxcompute_endpoint: str) -> str:
-    """Derive the CatalogAPI endpoint for a recognized standard FE endpoint."""
+    """Derive the CatalogAPI endpoint for a recognized standard FE endpoint.
+
+    Returns an empty string when the FE endpoint is not a public or VPC
+    customer endpoint, so the caller requires an explicit
+    ``catalogapi_endpoint`` instead of guessing a network plane.
+    """
 
     value = (maxcompute_endpoint or "").strip()
     parsed = urlsplit(value if "://" in value else f"//{value}")
@@ -133,7 +138,7 @@ def _catalogapi_endpoint_for_standard_fe(maxcompute_endpoint: str) -> str:
     vpc_match = _VPC_MAXCOMPUTE_HOST.fullmatch(host)
     if vpc_match is not None:
         region = vpc_match.group("region")
-        return f"https://catalogapi.{region}-intranet.maxcompute.aliyun-inc.com"
+        return f"https://catalogapi.{region}-vpc.maxcompute.aliyun-inc.com"
     return ""
 
 

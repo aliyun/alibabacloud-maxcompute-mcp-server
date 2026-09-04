@@ -196,7 +196,7 @@ The simplest endpoint configuration is:
 ```
 
 `region` and `network` synthesize FE, Catalog, and MCP endpoints by rule.
-`network: "vpc"` uses intranet FE/Catalog endpoints and a VPC MCP endpoint.
+`network: "vpc"` uses VPC FE/Catalog endpoints and a VPC MCP endpoint.
 
 #### Local-mode credential precedence
 
@@ -293,17 +293,22 @@ no Region list:
 
 | Service | public rule | VPC rule |
 | --- | --- | --- |
-| FE | `https://service.<region>.maxcompute.aliyun.com/api` | `https://service.<region>-intranet.maxcompute.aliyun-inc.com/api` |
-| CatalogAPI | `https://catalogapi.<region>.maxcompute.aliyun.com` | `https://catalogapi.<region>-intranet.maxcompute.aliyun-inc.com` |
+| FE | `https://service.<region>.maxcompute.aliyun.com/api` | `https://service.<region>-vpc.maxcompute.aliyun-inc.com/api` |
+| CatalogAPI | `https://catalogapi.<region>.maxcompute.aliyun.com` | `https://catalogapi.<region>-vpc.maxcompute.aliyun-inc.com` |
 | MCP for Mainland China Region (`cn-*`, except `cn-hongkong`) | `https://mcp.<region>.maxcompute.aliyun.com/mcp` | `https://mcp.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
 | MCP for overseas Region (including `cn-hongkong`) | `https://mcp-intl.<region>.maxcompute.aliyun.com/mcp` | `https://mcp-intl.<region>-vpc.maxcompute.aliyun-inc.com/mcp` |
 
 For legacy configuration, recognized FE and Catalog endpoints both contribute
-Region/network evidence. Public endpoints select public MCP; recognized VPC or
-intranet endpoints select VPC MCP. When both endpoints are recognized, they
+Region/network evidence. Public endpoints select public MCP; recognized VPC
+endpoints select VPC MCP. When both endpoints are recognized, they
 must identify the same Region and network. Conflicting endpoints never select
 remote, and explicit `region`/`network` values that contradict a recognized
 endpoint are rejected as invalid configuration.
+
+CatalogAPI is derived only from a public or VPC FE endpoint. Any other FE shape
+leaves CatalogAPI unset, so remote startup fails closed with an explicit error
+unless `catalogapi_endpoint` (or `MAXCOMPUTE_CATALOG_API_ENDPOINT`) is
+configured.
 
 A VPC configuration never selects public MCP or crosses Regions. Custom or
 historical endpoints with no verifiable Region/network or conflicting
