@@ -107,11 +107,15 @@ class CatalogMixin:
         token = opt_arg(args, "token")
         table_filter = opt_arg(args, "filter")
 
+        # pyodps-catalog 0.4.0 declares view and query as required arguments
+        # and leaves them out of the request only when they are unset.
         list_kwargs: dict[str, Any] = {
             "project_id": project,
             "schema_name": schema,
             "page_size": page_size,
             "page_token": token,
+            "view": None,
+            "query": None,
         }
         resp = self.sdk.client.list_tables(**list_kwargs)
         m = resp.to_map() if hasattr(resp, "to_map") else resp
@@ -222,6 +226,8 @@ class CatalogMixin:
                 table_name=table,
                 page_size=page_size,
                 page_token=token,
+                query=None,
+                view=None,
             )
         except AttributeError:
             return _unsupported("Current Catalog SDK does not support list_partitions.")
