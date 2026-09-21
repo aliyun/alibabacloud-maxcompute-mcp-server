@@ -68,7 +68,7 @@ dev = [
   "pip-audit==2.10.1",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
-  "ruff==0.16.5",
+  "ruff==0.16.8",
 ]
 # E2E credential proxy: local service uses AK to call STS AssumeRole, provides ALIBABA_CLOUD_CREDENTIALS_URI externally
 sts-proxy = ["alibabacloud-sts20150401>=1.2.0"]
@@ -84,7 +84,7 @@ dev = [
   "pip-audit==2.10.1",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
-  "ruff==0.16.5",
+  "ruff==0.16.8",
 ]
 
 # Default to Alibaba Cloud PyPI mirror; set UV_DEFAULT_INDEX=https://pypi.org/simple/ to use official PyPI
