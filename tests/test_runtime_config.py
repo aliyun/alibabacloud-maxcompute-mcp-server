@@ -46,6 +46,38 @@ def test_legacy_public_config_automatically_derives_regional_mcp(
     assert config.remote.url == ("https://mcp.cn-hangzhou.maxcompute.aliyun.com/mcp")
 
 
+def test_implicit_unscoped_file_retains_legacy_local_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_config(
+        tmp_path,
+        _legacy_config("https://service.cn-hangzhou.maxcompute.aliyun.com/api"),
+    )
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "MAXCOMPUTE_CATALOG_CONFIG",
+        "MAXCOMPUTE_MCP_MODE",
+        "MAXCOMPUTE_ENDPOINT",
+        "MAXCOMPUTE_REGION",
+        "MAXCOMPUTE_NETWORK",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert load_runtime_config(None).remote is None
+
+
+def test_explicit_scope_rejects_a_missing_remote_candidate(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        _legacy_config("https://custom.example.com/api", mcp={"scopes": []}),
+    )
+
+    with pytest.raises(ValueError, match="remote MCP endpoint cannot be derived"):
+        load_runtime_config(path)
+
+    assert load_runtime_config(path, mode="local").mode is RuntimeMode.LOCAL
+
+
 def test_legacy_odps_alias_is_still_loaded_for_remote_selection(
     tmp_path: Path,
 ) -> None:

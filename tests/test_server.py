@@ -191,7 +191,10 @@ def test_main_remote_mode_builds_token_provider_but_not_local_tools(
         main()
 
     build_tools_mock.assert_not_called()
-    build_provider_mock.assert_called_once_with(str(config_path), "default")
+    build_provider_mock.assert_called_once()
+    assert build_provider_mock.call_args.args[0].catalogapi_endpoint == (
+        "https://catalog.example.com"
+    )
     probe_remote_mock.assert_awaited_once()
     run_remote_mock.assert_awaited_once()
     assert run_remote_mock.await_args.args[1] is token_provider
@@ -260,6 +263,47 @@ def test_main_remote_streamable_http_builds_no_local_tools(
     }
 
 
+@pytest.mark.parametrize("transport", ["stdio", "streamable-http"])
+def test_explicit_scope_does_not_fall_back_to_local_sdk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transport: str
+) -> None:
+    """A failed remote startup must not discard the requested restriction."""
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "maxcompute": {
+                    "region": "cn-hangzhou",
+                    "network": "public",
+                    "mcp": {"scopes": []},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MAXCOMPUTE_CATALOG_CONFIG", raising=False)
+    monkeypatch.setattr(
+        sys, "argv", ["alibabacloud-maxcompute-mcp-server", "--transport", transport]
+    )
+    provider = MagicMock()
+    provider.get_access_token = AsyncMock(side_effect=CatalogTokenRequestError())
+    with (
+        patch(
+            "maxcompute_catalog_mcp.server.build_remote_token_provider",
+            return_value=provider,
+        ),
+        patch("maxcompute_catalog_mcp.server.build_tools") as build_local,
+        patch("maxcompute_catalog_mcp.server._run_stdio", new_callable=AsyncMock),
+        patch("maxcompute_catalog_mcp.server._run_http"),
+        pytest.raises(SystemExit, match="Remote MCP token issuance failed"),
+    ):
+        main()
+
+    provider.get_access_token.assert_awaited_once()
+    build_local.assert_not_called()
+
+
 class TestDefaultMode:
     @staticmethod
     def _runtime() -> RuntimeConfig:
@@ -293,7 +337,7 @@ class TestDefaultMode:
         ):
             asyncio.run(_run_default_stdio(self._runtime(), "/fake/config.json"))
 
-        build_provider_mock.assert_called_once_with("/fake/config.json", "daily")
+        build_provider_mock.assert_called_once_with(self._runtime().catalog_config)
         probe_mock.assert_awaited_once_with(self._runtime().remote, provider)
         remote_mock.assert_awaited_once_with(self._runtime().remote, provider)
         provider.get_access_token.assert_awaited_once_with()
@@ -706,9 +750,7 @@ def test_remote_initialization_preserves_request_id_from_each_failure_stage(
 
 
 @patch("maxcompute_catalog_mcp.server.build_catalog_client_set")
-@patch("maxcompute_catalog_mcp.server.load_configs")
 def test_build_remote_token_provider_reuses_selected_catalog_sdk(
-    mock_load,
     mock_build,
 ) -> None:
     config = MaxComputeCatalogConfig(
@@ -720,10 +762,9 @@ def test_build_remote_token_provider_reuses_selected_catalog_sdk(
     catalog_client = MagicMock()
     client_set = MagicMock()
     client_set.sdk.client = catalog_client
-    mock_load.return_value = ({"daily": config}, "daily")
     mock_build.return_value = client_set
 
-    provider = build_remote_token_provider("/fake/config.json", "daily")
+    provider = build_remote_token_provider(config)
 
     assert provider._client._catalog_client is catalog_client
     mock_build.assert_called_once_with(config)

@@ -23,7 +23,7 @@
 - **兼容原有配置**：通过已有 FE/Catalog endpoint 判断 Region 和 public/VPC 网络；简单 `region` + `network` 配置无需 Region 表即可生成 FE、Catalog 和 MCP endpoint。
 - **透明 remote 模式**：将 stdio 和 Streamable HTTP MCP 消息转发到托管版 Streamable HTTP endpoint，不重建或重命名远端工具，并保留 MRTR、progress notification 和未来 MCP 字段。
 - **当前协议兼容**：使用 MCP Python SDK 2.x，保留现代 `2026-07-28` 请求的 metadata 与路由 Header，同时兼容 legacy initialize。
-- **标准 CatalogAPI 鉴权**：remote 代理使用现有凭证 Provider 对无 body 的 `mcpAccessToken` 请求签名，续期时重新取得当前 AK/STS/ECS RAM Role 凭证。
+- **Remote 权限配置**：代理按所选 profile 申请短期 MCPC v2 令牌。续期沿用原权限和凭证来源。
 - **凭证隔离**：只把短期 `mcpc_` bearer 发给 Gateway，不在 MCP 消息或 URL 中发送 AK Secret / STS 凭证；选定 remote 后失败也绝不 fallback 到本地 SDK。
 
 ## Remote MCP Server（推荐）
@@ -56,13 +56,13 @@ MaxCompute Remote MCP Server。Remote MCP 服务减少本地运行环境和 MCP
 为保持老配置升级兼容，启动器默认使用 `default`。它从所选老配置的 FE 和 Catalog
 endpoint 判断 Region 和 public/VPC 网络，也支持显式 `region` + `network` 简单配置。
 能够确定 Region/网络时，本进程先通过 CatalogAPI 签发 token，再对唯一的地域 MCP
-endpoint 完成经过认证的 `initialize`。stdio 和 Streamable HTTP 使用相同的启动选型；
-token 签发或 remote 初始化失败时 fallback 到原有 local 实现。`--mode local` 可以
-显式固定原实现。
+endpoint 完成认证初始化。stdio 和 Streamable HTTP 使用相同的启动规则。所选
+profile 未配置 `mcp.scopes` 时，remote 启动失败可回退到本地 SDK。写明 scope 列表
+后只使用 remote。可用 `--mode local` 主动选择本地 SDK。
 
 | 模式 | MCP 路径 | 后端 | 本进程对外传输 |
 | --- | --- | --- | --- |
-| `default` | 启动时先探测 remote，再选择一种路径 | remote 优先；初始化失败使用本地 SDK | stdio 或 Streamable HTTP |
+| `default` | 启动时先探测 remote，再选择一种路径 | remote 优先；仅未配置 scope 时可回退到本地 SDK | stdio 或 Streamable HTTP |
 | `local` | MCP Client → 本进程 → 本地 SDK | MaxCompute SDK / CatalogAPI | stdio 或 Streamable HTTP |
 | `remote` | MCP Client → 本进程 → 托管 Gateway | Remote MCP Streamable HTTP | stdio 或 Streamable HTTP |
 
@@ -260,6 +260,40 @@ local 当前配置是进程级状态。运行时切换更适合 stdio / 单客�
 Streamable HTTP 模式下，所有客户端共享同一个当前配置，一个客户端调用 `use_config`
 会影响其他客户端。remote 模式在启动时固定一个 profile，不发布 local session 切换工具。
 
+#### Remote MCP 权限范围
+
+在具名配置 `configs.<name>.mcp.scopes` 中设置权限范围。单配置可写在 `maxcompute`
+或 `odps` 对象下。以下示例只允许访问元数据和执行只读 SQL：
+
+```json
+{
+  "default": "analytics-read",
+  "configs": {
+    "analytics-read": {
+      "region": "cn-hangzhou",
+      "network": "public",
+      "mcp": {
+        "scopes": ["maxcompute:metadata:read", "maxcompute:sql:read"]
+      }
+    }
+  }
+}
+```
+
+| `mcp.scopes` | 申请的权限 |
+| --- | --- |
+| 省略 | 使用元数据、SQL、运维、知识和 SemanticSpec 的只读权限。旧配置可继续加载。 |
+| `[]` | 不申请业务工具权限。 |
+| 指定列表 | 只申请列表中的权限，不追加默认权限。值无效时停止启动。 |
+
+续期沿用启动时所选 profile 的权限范围。修改配置后请重启代理。需要写入时，另建
+profile，添加所需写权限（如 `maxcompute:sql:write`），再通过 `--profile` 选择。
+这些范围不会新增 MaxCompute 资源权限，也不会替代写入确认。
+令牌签发服务和所选 Remote MCP 端点均须支持 MCPC v2。代理不会改用 v1 重试。
+显式选择 `--mode local` 时使用本地 SDK，不受 remote scope 限制。在 `default` 模式下，
+如果隐式加载当前目录的 `config.json`，且配置中没有 scope、环境中没有端点设置，仍使用
+本地 SDK。要使用远端只读默认权限，请显式选择 `--mode remote`。
+
 #### default 选型与 remote 覆盖
 
 老版本的顶层 `maxcompute`、顶层 `odps`、`configs` 命名配置以及纯环境变量配置都继续
@@ -282,8 +316,8 @@ CatalogAPI，remote 启动会 fail closed 并给出明确报错，除非显式�
 `catalogapi_endpoint`（或 `MAXCOMPUTE_CATALOG_API_ENDPOINT`）。
 
 VPC 配置绝不选择公网 MCP，也不跨 Region。只有自定义/历史 endpoint 且无法验证
-Region/网络或 FE/Catalog 证据冲突时，`default` 保持原 local 实现；显式 `remote`
-模式 fail closed。
+Region/网络或 FE/Catalog 证据冲突时，`default` 仅在未配置 scope 时回退到本地 SDK。
+已配置 scope 或显式使用 `remote` 时，启动报错。
 
 MCP 域名只按 Region 决定：中国内地 Region（`cn-*`，但不包括 `cn-hongkong`）使用
 `mcp`，`cn-hongkong` 和其他海外 Region 使用 `mcp-intl`。这不是账号站点探测；
@@ -309,8 +343,8 @@ CatalogAPI 签发 token 的链路不进入 RAM OAuth。生成的 endpoint 只在
 ```
 
 remote URL 必须是无 userinfo、query、fragment 且路径严格为 `/mcp` 的 resource。
-代理拒绝 redirect、忽略环境 HTTP proxy，并以 single-flight 方式通过 CatalogAPI
-续期短期 bearer token。CatalogAPI 接口无业务 body，scope 和 TTL 由服务端固定。
+代理转发 MCP 请求时拒绝重定向，不使用环境中的 HTTP 代理。并发请求共享一次令牌续期，
+续期时不改变权限范围。
 
 Streamable HTTP 代理转发 `POST`、`GET` 和 `DELETE`，同时支持 JSON 和 Server-Sent
 Events（SSE）。代理保留请求 body 字节、非错误 remote 消息、session 与断点续传 Header、
@@ -362,7 +396,7 @@ uv run alibabacloud-maxcompute-mcp-server \
 
 listener 地址为 `http://127.0.0.1:8000/mcp`。除非其他可信主机必须访问本进程，否则请
 保留默认的 loopback 监听地址。`default` 下可以省略 `--mode remote`；启动探测成功时
-使用 remote 代理，remote 初始化失败时才 fallback 到 local Streamable HTTP 实现。
+使用 remote 代理。仅当未配置 `mcp.scopes` 时，remote 初始化失败才回退到本地 SDK。
 
 ### MCP 工具
 

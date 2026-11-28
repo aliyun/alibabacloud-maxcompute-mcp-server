@@ -24,7 +24,7 @@ A local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) launche
 - **Backward-compatible configuration**: existing FE/Catalog endpoints determine Region and public/VPC network; simple `region` + `network` config derives FE, Catalog, and MCP endpoints without a Region registry.
 - **Transparent remote mode**: stdio and Streamable HTTP MCP messages are relayed to the hosted Streamable HTTP endpoint without rebuilding or renaming the remote tool surface. MRTR, progress notifications, and future MCP fields remain intact.
 - **Current protocol support**: MCP Python SDK 2.x preserves modern `2026-07-28` request metadata and routing headers while retaining legacy initialize compatibility.
-- **Standard CatalogAPI authentication**: the remote proxy signs the bodyless `mcpAccessToken` operation with the existing credential provider and resolves current AK/STS/ECS RAM Role credentials again on renewal.
+- **Scoped remote authentication**: the proxy requests a short-lived MCPC v2 token using the selected profile. Renewal keeps the same scopes and uses the existing credential provider.
 - **Credential isolation**: only a short-lived `mcpc_` bearer is sent to the Gateway; AccessKey secrets and STS credentials never enter MCP messages or URLs, and a selected remote session never falls back to the local SDK.
 
 ## Remote MCP Server (Recommended)
@@ -63,13 +63,14 @@ derives the Region and public/VPC network from the selected legacy FE and
 Catalog endpoints, or uses an explicit `region` plus `network` simple config.
 When Region/network can be determined, the process obtains a CatalogAPI token
 and authenticates the one regional MCP endpoint with `initialize`. This startup
-selection applies to both stdio and Streamable HTTP. Token issuance or remote
-initialization failure falls back to the original local implementation. Use
-`--mode local` to pin that implementation.
+selection applies to both stdio and Streamable HTTP. When the selected profile
+omits `mcp.scopes`, a startup failure can fall back to the local SDK. An
+explicit scope list requires remote mode. Use `--mode local` to pin the local
+SDK independently of remote scopes.
 
 | Mode | MCP path | Backend | Transport exposed by this process |
 | --- | --- | --- | --- |
-| `default` | Probe remote at startup, then select one path | Remote MCP first; local SDK on initialization failure | stdio or Streamable HTTP |
+| `default` | Probe remote at startup, then select one path | Remote MCP first; local SDK fallback only without explicit scopes | stdio or Streamable HTTP |
 | `local` | MCP client → this process → local SDK | MaxCompute SDK / CatalogAPI | stdio or Streamable HTTP |
 | `remote` | MCP client → this process → hosted Gateway | Remote MCP Streamable HTTP | stdio or Streamable HTTP |
 
@@ -121,9 +122,9 @@ python -m pip install "alibabacloud-maxcompute-mcp-server[local]"
 uv tool install "alibabacloud-maxcompute-mcp-server[local]"
 ```
 
-With the base package, `default` still tries remote first. If remote
-initialization fails, the local fallback reports the command above instead of
-silently running without its SDK dependencies.
+With the base package, `default` still tries remote first. Without explicit
+scopes, the local fallback reports the installation command above if the SDK
+is missing.
 
 Verify the installed entry point:
 
@@ -285,6 +286,44 @@ clients share the same active config, so a `use_config` call from one client
 affects the others. Remote mode fixes one profile at startup and does not expose
 local session-switching tools.
 
+#### Remote MCP permission scopes
+
+Set `mcp.scopes` in a named profile (`configs.<name>.mcp.scopes`) or in the
+single-config `maxcompute` or `odps` object. For example, to limit a profile to
+metadata access and read-only SQL:
+
+```json
+{
+  "default": "analytics-read",
+  "configs": {
+    "analytics-read": {
+      "region": "cn-hangzhou",
+      "network": "public",
+      "mcp": {
+        "scopes": ["maxcompute:metadata:read", "maxcompute:sql:read"]
+      }
+    }
+  }
+}
+```
+
+| `mcp.scopes` | Requested permissions |
+| --- | --- |
+| Omitted | Read-only scopes for metadata, SQL, operations, knowledge, and SemanticSpec. Existing config files need no changes to keep these permissions. |
+| `[]` | No business-tool permissions. |
+| A list of scopes | Only the listed scopes, with no default scopes added. Invalid values stop startup. |
+
+The proxy uses the selected profile for the life of the process, including on
+renewal. Restart the proxy after editing its scopes. If your workflow writes,
+configure a separate profile with the specific permissions it needs, such as
+`maxcompute:sql:write`, and select it using `--profile`. These scopes do not
+change your existing MaxCompute permissions or replace write confirmation.
+The issuer and selected remote endpoint must support MCPC v2. The proxy does
+not retry with a v1 token. Explicit `--mode local` uses the SDK and is outside
+these remote scope restrictions. An unscoped `config.json` loaded implicitly in
+`default` mode keeps its local behavior when no endpoint is set in the environment.
+To use the remote read-only default with that file, select `--mode remote`.
+
 #### Default selection and remote overrides
 
 Released top-level `maxcompute`, top-level `odps`, named `configs`, and
@@ -312,8 +351,8 @@ configured.
 
 A VPC configuration never selects public MCP or crosses Regions. Custom or
 historical endpoints with no verifiable Region/network or conflicting
-FE/Catalog evidence stay on legacy local behavior under `default`; explicit
-`remote` mode fails closed.
+FE/Catalog evidence stay on local behavior under `default` without explicit
+scopes. Scoped profiles and explicit `remote` mode fail startup instead.
 
 Endpoint naming is determined only by Region: Mainland China Regions (`cn-*`,
 except `cn-hongkong`) use `mcp`, while `cn-hongkong` and every other overseas
@@ -343,9 +382,9 @@ credentials:
 ```
 
 The remote URL must be an exact `/mcp` resource without userinfo, query, or
-fragment. The proxy rejects redirects, ignores ambient HTTP proxy variables,
-and renews the short-lived bearer through CatalogAPI single-flight. The
-CatalogAPI operation has no business body; scope and TTL are server-owned.
+fragment. The proxy rejects redirects and ignores ambient HTTP proxy variables
+for remote MCP requests. Concurrent requests share one token renewal using the
+same scopes.
 
 The Streamable HTTP proxy forwards `POST`, `GET`, and `DELETE`, including JSON
 and Server-Sent Events (SSE). It preserves request body bytes, non-error remote
