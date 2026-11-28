@@ -35,17 +35,21 @@ dependencies = [
   "alibabacloud-credentials>=1.0.12",  # Alibaba Cloud credentials SDK, supports default credential chain and ALIBABA_CLOUD_CREDENTIALS_URI (aligned with dataworks-mcp-server)
   "maxcompute_tea_openapi>=1.3.1",
   "maxcompute_tea_util>=0.0.1",
-  "mcp>=2.0.0,<3",     # Official MCP Python SDK with 2026-07-28 support
+  "mcp>=2.2.0,<3",     # Official MCP Python SDK with 2026-07-28 support
   "httpx2>=2.12.0,<3", # MCP 2.x Streamable HTTP client dependency
   "starlette>=1.6.0,<2", # ASGI surface for the transparent HTTP proxy
   "uvicorn>=0.52.4",   # ASGI server for Streamable HTTP mode
-  # Security floors for runtime transitive dependencies. These must be public
+  # Security floors for runtime dependencies. These must be public
   # Requires-Dist entries because PyPI installers do not read [tool.uv].
   "cryptography>=46.0.6",
   "requests>=2.33.0",
   "idna>=3.15",
-  "urllib3>=2.7.0",
-  "aiohttp>=3.14.0",
+  "urllib3>=2.8.0",
+  "aiohttp>=3.14.4",
+  "multidict>=6.9.1",
+  "certifi>=2026.10.19",
+  "PyJWT>=2.15.0,<3",
+  "opentelemetry-api>=1.45.2",
 ]
 
 [project.urls]
@@ -65,7 +69,10 @@ local = [
 dev = [
   "diff-cover>=10.4.1,<11",
   "mypy==2.3.1",
-  "pip-audit==2.10.1",
+  # The auditor's patched file cache requires Python 3.11+; the proxy does not.
+  "pip-audit==2.10.1; python_version >= '3.11'",
+  "filelock>=4.2.1; python_version >= '3.11'",
+  "msgpack>=1.2.3; python_version >= '3.11'",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "ruff==0.16.5",
@@ -81,7 +88,9 @@ dev = [
   "anthropic>=0.122.0",
   "diff-cover>=10.4.1,<11",
   "mypy==2.3.1",
-  "pip-audit==2.10.1",
+  "pip-audit==2.10.1; python_version >= '3.11'",
+  "filelock>=4.2.1; python_version >= '3.11'",
+  "msgpack>=1.2.3; python_version >= '3.11'",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "ruff==0.16.5",
