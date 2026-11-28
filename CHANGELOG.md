@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-28
+
 ### Added
 
 - Configure requested Remote MCP permissions per profile with `mcp.scopes`.
@@ -19,6 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `mcp.scopes` default to read-only scopes. To keep a workflow that writes,
   explicitly configure the required write scope. Profiles with explicit scopes
   do not fall back to local SDK mode on remote startup failure.
+
+### Security
+
+- Updated the runtime dependency minimums and lockfile to include upstream
+  security fixes.
 
 ## [0.1.8] - 2026-09-04
 
@@ -135,7 +142,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Rule-based public and VPC endpoint derivation for Mainland China and
   international Regions without a fixed Region registry.
 
-[Unreleased]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.8...v0.2.0
 [0.1.6]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/aliyun/alibabacloud-maxcompute-mcp-server/compare/v0.1.3...v0.1.4
