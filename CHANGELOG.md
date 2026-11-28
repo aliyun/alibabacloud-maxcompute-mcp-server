@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Configure requested Remote MCP permissions per profile with `mcp.scopes`.
+  An explicit empty list requests no business-tool permissions. The proxy
+  retains the selected scopes on renewal.
+
+### Changed
+
+- Remote authentication uses MCPC v2. Existing configuration files without
+  `mcp.scopes` default to read-only scopes. To keep a workflow that writes,
+  explicitly configure the required write scope. Profiles with explicit scopes
+  do not fall back to local SDK mode on remote startup failure.
+
 ## [0.1.8] - 2026-09-04
 
 ### Fixed

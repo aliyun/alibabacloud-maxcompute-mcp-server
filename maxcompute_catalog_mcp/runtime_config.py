@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .config import MaxComputeCatalogConfig, load_configs
+from .config import (
+    MaxComputeCatalogConfig,
+    parse_configs,
+    read_config_document,
+    resolve_config_path,
+)
 
 
 class RuntimeMode(str, Enum):
@@ -52,6 +55,7 @@ class RuntimeConfig:
     mode: RuntimeMode
     profile: str = ""
     remote: RemoteRuntimeConfig | None = None
+    catalog_config: MaxComputeCatalogConfig | None = field(default=None, repr=False)
 
 
 _REGION_PATTERN = r"[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?"
@@ -255,22 +259,6 @@ def _validate_network_compatibility(
         raise ValueError("a VPC MaxCompute endpoint requires a same Region VPC MCP URL")
 
 
-def _load_document(config_path: str | None) -> dict[str, Any]:
-    resolved_path = _first_non_empty(
-        config_path,
-        os.getenv("MAXCOMPUTE_CATALOG_CONFIG"),
-    )
-    if not resolved_path:
-        return {}
-    path = Path(resolved_path)
-    if not path.exists():
-        return {}
-    loaded = json.loads(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(loaded, dict):
-        raise TypeError("runtime config must be a JSON object")
-    return loaded
-
-
 def load_runtime_config(
     config_path: str | None,
     *,
@@ -281,13 +269,14 @@ def load_runtime_config(
 ) -> RuntimeConfig:
     """Resolve a safe remote candidate for the requested startup mode.
 
-    No configured mode means ``default``. FE/Catalog endpoints or explicit
-    simple config identify the Region and network used to derive one regional
-    MCP endpoint. Custom or conflicting endpoints leave no remote
-    candidate, so the server starts the original local implementation.
+    FE/Catalog endpoints or explicit Region and network identify the remote
+    endpoint. An explicit scope list requires remote mode, even when the
+    requested mode is ``default``. Explicit ``local`` remains independent.
     """
 
-    document = _load_document(config_path)
+    explicit_path = config_path or os.getenv("MAXCOMPUTE_CATALOG_CONFIG")
+    path = resolve_config_path(explicit_path)
+    document = read_config_document(path)
     raw_mode = _first_non_empty(
         mode,
         os.getenv("MAXCOMPUTE_MCP_MODE"),
@@ -311,12 +300,12 @@ def load_runtime_config(
     # default modes support both stdio and Streamable HTTP.
     _ = allow_remote
 
-    if (
-        requested_mode is RuntimeMode.DEFAULT
-        and not document
-        and not os.getenv("MAXCOMPUTE_ENDPOINT")
-        and not os.getenv("MAXCOMPUTE_REGION")
-        and not os.getenv("MAXCOMPUTE_NETWORK")
+    has_environment_endpoint = any(
+        os.getenv(name)
+        for name in ("MAXCOMPUTE_ENDPOINT", "MAXCOMPUTE_REGION", "MAXCOMPUTE_NETWORK")
+    )
+    if requested_mode is RuntimeMode.DEFAULT and not (
+        document or has_environment_endpoint
     ):
         return RuntimeConfig(mode=RuntimeMode.DEFAULT, profile=resolved_profile)
 
@@ -327,11 +316,20 @@ def load_runtime_config(
     if unsupported:
         raise ValueError(f"remote config contains unsupported field: {unsupported[0]}")
 
-    configs, default_name = load_configs(config_path)
+    configs, default_name = parse_configs(path, document)
     selected_name = resolved_profile or default_name
     if selected_name not in configs:
         raise ValueError(f"unknown MaxCompute profile: {selected_name!r}")
-    endpoint_identity = _configured_endpoint_identity(configs[selected_name])
+    catalog_config = configs[selected_name]
+    if catalog_config.mcp_scopes is not None:
+        # The SDK path has no remote scopes and must not be a fallback.
+        requested_mode = RuntimeMode.REMOTE
+    elif requested_mode is RuntimeMode.DEFAULT and not (
+        explicit_path or has_environment_endpoint
+    ):
+        # An older implicit config.json without scopes still selects local.
+        return RuntimeConfig(mode=RuntimeMode.DEFAULT, profile=selected_name)
+    endpoint_identity = _configured_endpoint_identity(catalog_config)
     configured_remote_url = _first_non_empty(
         remote_url,
         os.getenv("MAXCOMPUTE_REMOTE_MCP_URL"),
@@ -353,6 +351,7 @@ def load_runtime_config(
             mode=requested_mode,
             profile=selected_name,
             remote=RemoteRuntimeConfig(url=configured_remote_url),
+            catalog_config=catalog_config,
         )
 
     if endpoint_identity is None:
@@ -365,4 +364,5 @@ def load_runtime_config(
         mode=requested_mode,
         profile=selected_name,
         remote=RemoteRuntimeConfig(url=_regional_mcp_url(endpoint_identity)),
+        catalog_config=catalog_config,
     )
