@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import MagicMock, patch
@@ -44,8 +43,8 @@ class _CredHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
             self.server.request_count += 1
+            self.wfile.write(data)
         else:
             self.send_response(404)
             self.end_headers()
@@ -383,7 +382,10 @@ class TestCredentialsAutoRefreshE2E:
         from alibabacloud_credentials.utils import auth_util
 
         uri = self.server.url()
-        self.server.set_credentials("token-v1", expire_seconds=1)
+        # Stay inside the SDK's refresh window, but allow for slow CI runners
+        # and the second-level precision of the HTTP expiration timestamp.
+        short_lifetime_seconds = 60
+        self.server.set_credentials("token-v1", expire_seconds=short_lifetime_seconds)
 
         with (
             patch.object(auth_util, "environment_credentials_uri", uri),
@@ -410,16 +412,13 @@ class TestCredentialsAutoRefreshE2E:
             cred1 = cred_client.get_credential()
             assert cred1.get_security_token() == "token-v1"
 
-            # Mock server switches token, verify same cred_client can detect new token.
-            # With expire_seconds=1, the cached value's stale_time=now, so next
-            # get_credential() sees _cache_is_stale()=True → synchronous refresh → token-v2.
-            self.server.set_credentials("token-v2", expire_seconds=1)
-            time.sleep(0.1)
-
-            cred2 = cred_client.get_credential()
-            assert cred2.get_security_token() == "token-v2", (
-                "After token switch, credential_client should return new token (Tea SDK uses it on next request)"
+            # The existing SDK client must fetch again without a wall-clock sleep.
+            self.server.set_credentials(
+                "token-v2", expire_seconds=short_lifetime_seconds
             )
+            cred2 = cred_client.get_credential()
+            assert cred2.get_security_token() == "token-v2"
+            assert self.server.request_count() == 2
 
     def test_catalog_sdk_create_with_credentials_uri(self):
         """MaxComputeCatalogSdk.create() with credential_client should call _build_catalog_client with credential_client=."""
