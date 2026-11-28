@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -10,21 +14,22 @@ from typing import Any, Protocol
 from alibabacloud_tea_util import models as util_models
 from maxcompute_tea_openapi import models as openapi_models
 
+from .mcp_scopes import DEFAULT_MCP_SCOPES
 from .request_ids import request_id_from_exception, sanitize_request_id
 
 _MCP_ACCESS_TOKEN_PATH = "/api/catalog/v1alpha/mcpAccessToken"
-_EXPECTED_SCOPES = ["maxcompute:read", "maxcompute:sql"]
+_TOKEN_PREFIX = "mcpc_"
 _TOKEN_LIFETIME_SECONDS = 300
 _DEFAULT_EXPIRY_SKEW_SECONDS = 60.0
 _REQUEST_TIMEOUT_MILLISECONDS = 5000
-_MAX_ACCESS_TOKEN_CHARS = 16 * 1024
-_EMPTY_BODY_CONTENT_TYPE = "application/octet-stream"
+_MAX_ACCESS_TOKEN_CHARS = 7168
+_JWT_SEGMENT = re.compile(r"[A-Za-z0-9_-]+")
 
 
 class CatalogTokenClient(Protocol):
     """Issue one token through the authenticated CatalogAPI path."""
 
-    async def issue_access_token(self) -> object: ...
+    async def issue_access_token(self, *, scopes: tuple[str, ...]) -> object: ...
 
 
 class CatalogTokenRequestError(RuntimeError):
@@ -52,12 +57,14 @@ class AccessToken:
 
 
 class CatalogMCPAccessTokenClient:
-    """Narrow bodyless operation over the generated Catalog SDK client."""
+    """Request a v2 token through the generated Catalog SDK client."""
 
     def __init__(self, catalog_client: Any) -> None:
         self._catalog_client = catalog_client
 
-    async def issue_access_token(self) -> object:
+    async def issue_access_token(
+        self, *, scopes: tuple[str, ...] = DEFAULT_MCP_SCOPES
+    ) -> object:
         """Use the SDK's normal dynamic-credential signing path."""
 
         params = openapi_models.Params(
@@ -67,13 +74,10 @@ class CatalogMCPAccessTokenClient:
             method="POST",
             auth_type="AK",
             body_type="json",
+            req_body_type="json",
         )
-        # Tea sends an empty stream as application/octet-stream even when the
-        # generated request model has no body. CatalogAPI signs the received
-        # Content-Type, so declare the transport default before the SDK builds
-        # its canonical string or the server will reject the signature.
         request = openapi_models.OpenApiRequest(
-            headers={"content-type": _EMPTY_BODY_CONTENT_TYPE},
+            body={"expiresIn": _TOKEN_LIFETIME_SECONDS, "policy": list(scopes)},
         )
         runtime = util_models.RuntimeOptions(
             autoretry=False,
@@ -97,11 +101,13 @@ class CatalogAccessTokenProvider:
         self,
         *,
         client: CatalogTokenClient,
+        scopes: tuple[str, ...] = DEFAULT_MCP_SCOPES,
         expiry_skew: float = _DEFAULT_EXPIRY_SKEW_SECONDS,
     ) -> None:
         if expiry_skew < 0 or expiry_skew >= _TOKEN_LIFETIME_SECONDS:
             raise ValueError("expiry skew must be within the token lifetime")
         self._client = client
+        self._scopes = tuple(scopes)
         self._expiry_skew = expiry_skew
         self._token: AccessToken | None = None
         self._renew_lock = asyncio.Lock()
@@ -130,16 +136,16 @@ class CatalogAccessTokenProvider:
             return renewed.value
 
     async def _renew(self) -> AccessToken:
+        started_at = time.monotonic()
         try:
-            payload = await self._client.issue_access_token()
+            payload = await self._client.issue_access_token(scopes=self._scopes)
         except CatalogTokenRequestError:
             raise
         except Exception as error:  # noqa: BLE001 -- provider boundary.
             raise CatalogTokenRequestError(request_id_from_exception(error)) from None
-        return self._parse_access_token(payload)
+        return self._parse_access_token(payload, started_at=started_at)
 
-    @staticmethod
-    def _parse_access_token(payload: object) -> AccessToken:
+    def _parse_access_token(self, payload: object, *, started_at: float) -> AccessToken:
         if not isinstance(payload, dict):
             raise TypeError("CatalogAPI MCP token returned an invalid response")
         required_fields = {"accessToken", "tokenType", "expiresIn", "scope"}
@@ -151,8 +157,7 @@ class CatalogAccessTokenProvider:
         value = payload.get("accessToken")
         if (
             not isinstance(value, str)
-            or not value.startswith("mcpc_")
-            or len(value) <= len("mcpc_")
+            or not value.startswith(_TOKEN_PREFIX)
             or len(value) > _MAX_ACCESS_TOKEN_CHARS
         ):
             raise RuntimeError("CatalogAPI MCP token returned an invalid access token")
@@ -160,16 +165,59 @@ class CatalogAccessTokenProvider:
             raise RuntimeError("CatalogAPI MCP token returned wrong tokenType")
 
         expires_in = payload.get("expiresIn")
+        if type(expires_in) is not int or expires_in != _TOKEN_LIFETIME_SECONDS:
+            raise RuntimeError("CatalogAPI MCP token returned wrong expiresIn")
+
+        expected_scopes = list(self._scopes)
+        if payload.get("scope") != expected_scopes:
+            raise RuntimeError("CatalogAPI MCP token returned wrong scope")
+        claims = _read_catalog_claims(value)
+        version = claims.get("authz_version")
+        policy_version = claims.get("tool_policy_version")
         if (
-            isinstance(expires_in, bool)
-            or not isinstance(expires_in, int)
-            or expires_in != _TOKEN_LIFETIME_SECONDS
+            type(version) is not int
+            or version != 2
+            or type(policy_version) is not int
+            or policy_version < 1
+        ):
+            raise RuntimeError(
+                "CatalogAPI MCP token returned wrong authorization version"
+            )
+        if claims.get("scope") != expected_scopes:
+            raise RuntimeError("CatalogAPI MCP token returned wrong scope")
+        issued_at, expires_at = claims.get("iat"), claims.get("exp")
+        if (
+            type(issued_at) is not int
+            or type(expires_at) is not int
+            or expires_at - issued_at != expires_in
         ):
             raise RuntimeError("CatalogAPI MCP token returned wrong expiresIn")
-        if payload.get("scope") != _EXPECTED_SCOPES:
-            raise RuntimeError("CatalogAPI MCP token returned wrong scope")
 
-        return AccessToken(
-            value=value,
-            expires_at=time.monotonic() + expires_in,
-        )
+        wall_now = time.time()
+        if expires_at <= wall_now:
+            raise RuntimeError("CatalogAPI MCP token returned an expired access token")
+        # Anchor the signed expiry to the monotonic cache clock without
+        # extending the requested lifetime if the issuer clock is ahead.
+        now = time.monotonic()
+        remaining = min(expires_at, wall_now + expires_in) - wall_now
+        deadline = min(now + remaining, started_at + expires_in)
+        if deadline <= now:
+            raise RuntimeError("CatalogAPI MCP token returned an expired access token")
+        return AccessToken(value=value, expires_at=deadline)
+
+
+def _read_catalog_claims(value: str) -> dict[str, object]:
+    """Check request/response consistency only. The gateway verifies the JWT."""
+    parts = value.removeprefix(_TOKEN_PREFIX).split(".")
+    if len(parts) == 3 and all(_JWT_SEGMENT.fullmatch(part) for part in parts):
+        payload = parts[1]
+        try:
+            claims = json.loads(
+                base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+            )
+        except (ValueError, binascii.Error, RecursionError):
+            pass
+        else:
+            if isinstance(claims, dict):
+                return claims
+    raise RuntimeError("CatalogAPI MCP token returned an invalid access token")

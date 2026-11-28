@@ -4,6 +4,9 @@
     "accessKeySecret": "<ALIBABA_CLOUD_ACCESS_KEY_SECRET>",
     "defaultProject": "<DEFAULT_PROJECT_NAME>",
     "region": "cn-hangzhou",
-    "network": "public"
+    "network": "public",
+    "mcp": {
+      "scopes": ["maxcompute:metadata:read", "maxcompute:sql:read"]
+    }
   }
 }
