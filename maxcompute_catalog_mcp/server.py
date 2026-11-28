@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any
 from mcp.server import Server as McpServer
 
 from .client_factory import build_catalog_client_set, build_client_set
-from .config import load_configs
+from .config import MaxComputeCatalogConfig, load_configs
 from .mcp_protocol import JsonRpcError
+from .mcp_scopes import DEFAULT_MCP_SCOPES
 from .remote_auth import (
     CatalogAccessTokenProvider,
     CatalogMCPAccessTokenClient,
@@ -201,17 +202,14 @@ def _load_local_tools_type() -> type[Tools]:
 
 
 def build_remote_token_provider(
-    config_path: str | None,
-    profile: str,
+    config: MaxComputeCatalogConfig | None,
 ) -> CatalogAccessTokenProvider:
-    """Build only the credential and Catalog clients needed by remote mode."""
+    """Use the same selected profile for the remote URL and the token policy."""
+    if config is None:
+        raise RuntimeError("No MaxCompute profile selected for remote MCP")
 
     try:
-        configs, default_name = load_configs(config_path)
-        selected_name = profile or default_name
-        if selected_name not in configs:
-            raise ValueError(f"unknown MaxCompute profile: {selected_name!r}")
-        client_set = build_catalog_client_set(configs[selected_name])
+        client_set = build_catalog_client_set(config)
     except ValueError:
         raise RuntimeError(
             "Failed to initialize credentials for remote MCP token issuance. "
@@ -223,6 +221,7 @@ def build_remote_token_provider(
         ) from None
     return CatalogAccessTokenProvider(
         client=CatalogMCPAccessTokenClient(client_set.sdk.client),
+        scopes=DEFAULT_MCP_SCOPES if config.mcp_scopes is None else config.mcp_scopes,
     )
 
 
@@ -409,10 +408,7 @@ async def _run_default_stdio(
     remote = runtime_config.remote
     if remote is not None:
         try:
-            token_provider = build_remote_token_provider(
-                config_path,
-                runtime_config.profile,
-            )
+            token_provider = build_remote_token_provider(runtime_config.catalog_config)
             await _initialize_remote_mcp(remote, token_provider)
         except Exception as error:  # noqa: BLE001 -- default mode must fall back.
             _log_remote_fallback(error)
@@ -436,10 +432,7 @@ def _run_default_http(
     remote = runtime_config.remote
     if remote is not None:
         try:
-            token_provider = build_remote_token_provider(
-                config_path,
-                runtime_config.profile,
-            )
+            token_provider = build_remote_token_provider(runtime_config.catalog_config)
             asyncio.run(_initialize_remote_mcp(remote, token_provider))
         except Exception as error:  # noqa: BLE001 -- default mode must fall back.
             _log_remote_fallback(error)
@@ -507,10 +500,7 @@ def main() -> None:
         if runtime_config.remote is None:
             sys.exit("Remote MCP proxy configuration is missing")
         try:
-            token_provider = build_remote_token_provider(
-                options.config_path,
-                runtime_config.profile,
-            )
+            token_provider = build_remote_token_provider(runtime_config.catalog_config)
         except RuntimeError:
             sys.exit("Remote MCP token provider initialization failed")
         try:

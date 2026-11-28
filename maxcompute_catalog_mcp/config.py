@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .mcp_scopes import parse_mcp_scopes
 from .tools_common import _env
 
 _ALLOWED_PROTOCOLS = ("", "http", "https")
@@ -72,6 +73,7 @@ class MaxComputeCatalogConfig:
     description: str = (
         ""  # display-only human note for named configs; not used for connection
     )
+    mcp_scopes: tuple[str, ...] | None = None  # None means use remote defaults.
 
 
 @dataclass(frozen=True)
@@ -220,18 +222,31 @@ def resolve_catalogapi_endpoint_with_client(
     return body
 
 
-def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
-    """Load config from file and environment variables.
+def resolve_config_path(config_path: str | None) -> Path:
+    return Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
 
-    Does not discover catalogapi_endpoint over the network; if simple config
-    cannot synthesize it, discovery happens in build_tools() after the ODPS
-    client is created.
-    """
-    path = Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
-    conn: dict[str, Any] = {}
-    if path.exists():
-        cfg_json = json.loads(path.read_text(encoding="utf-8")) or {}
-        conn = (cfg_json.get("maxcompute") or cfg_json.get("odps")) or {}
+
+def read_config_document(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise TypeError("MCP config must be a JSON object")
+    return document
+
+
+def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
+    """Load config from file and environment variables without network calls."""
+    path = resolve_config_path(config_path)
+    return _config_from_single(path, read_config_document(path))
+
+
+def _config_from_single(
+    path: Path, document: dict[str, Any]
+) -> MaxComputeCatalogConfig:
+    conn = (document.get("maxcompute") or document.get("odps")) or {}
+    if not isinstance(conn, dict):
+        raise TypeError("maxcompute or odps config must be an object")
 
     def pick(*keys: str, from_env: str = "") -> str:
         v = _env(from_env) if from_env else ""
@@ -313,6 +328,7 @@ def load_config(config_path: str | None = None) -> MaxComputeCatalogConfig:
         protocol=protocol,
         region=region,
         network=network,
+        mcp_scopes=parse_mcp_scopes(conn.get("mcp", {})),
     )
 
 
@@ -362,6 +378,7 @@ def _config_from_bundle(conn: dict[str, Any]) -> MaxComputeCatalogConfig:
         region=region,
         network=network,
         description=pick("description", "desc"),
+        mcp_scopes=parse_mcp_scopes(conn.get("mcp", {})),
     )
 
 
@@ -379,12 +396,15 @@ def load_configs(
     env-only setups behave exactly as before, surfaced as a single config
     named "default".
     """
-    path = Path(config_path or _env("MAXCOMPUTE_CATALOG_CONFIG") or "config.json")
-    raw: dict[str, Any] = {}
-    if path.exists():
-        raw = json.loads(path.read_text(encoding="utf-8")) or {}
+    path = resolve_config_path(config_path)
+    return parse_configs(path, read_config_document(path))
 
-    configs_obj = raw.get("configs")
+
+def parse_configs(
+    path: Path, document: dict[str, Any]
+) -> tuple[dict[str, MaxComputeCatalogConfig], str]:
+    """Build the profiles from one startup configuration snapshot."""
+    configs_obj = document.get("configs")
     if isinstance(configs_obj, dict) and configs_obj:
         configs: dict[str, MaxComputeCatalogConfig] = {}
         for name, bundle in configs_obj.items():
@@ -394,7 +414,7 @@ def load_configs(
                 configs[name] = _config_from_bundle(bundle)
             except ValueError as e:
                 raise ValueError(f"invalid named config {name!r}: {e}") from e
-        default_name = (raw.get("default") or "").strip() or next(iter(configs))
+        default_name = (document.get("default") or "").strip() or next(iter(configs))
         if default_name not in configs:
             raise ValueError(
                 f"default config {default_name!r} not found in 'configs'; "
@@ -403,5 +423,4 @@ def load_configs(
         return configs, default_name
 
     # Legacy single-config / env-only path → one config named "default".
-    single = load_config(config_path)
-    return {"default": single}, "default"
+    return {"default": _config_from_single(path, document)}, "default"

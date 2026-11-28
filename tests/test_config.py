@@ -648,6 +648,92 @@ def test_resolve_endpoint_content_decode_fallback() -> None:
 
 
 class TestLoadConfigs:
+    def test_named_profiles_keep_separate_mcp_scopes(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.json"
+        connect = {"region": "cn-hangzhou", "network": "public"}
+        path.write_text(
+            json.dumps(
+                {
+                    "configs": {
+                        "legacy": connect,
+                        "no-grants": {**connect, "mcp": {"scopes": []}},
+                        "writes": {
+                            **connect,
+                            "mcp": {"scopes": ["maxcompute:sql:write"]},
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        configs, default = load_configs(str(path))
+
+        assert default == "legacy"
+        assert configs["legacy"].mcp_scopes is None
+        assert configs["no-grants"].mcp_scopes == ()
+        assert configs["writes"].mcp_scopes == ("maxcompute:sql:write",)
+
+    @pytest.mark.parametrize("key", ["maxcompute", "odps"])
+    def test_legacy_single_config_accepts_mcp_scopes(
+        self, tmp_path: Path, key: str
+    ) -> None:
+        path = tmp_path / "config.json"
+        path.write_text(
+            json.dumps(
+                {
+                    key: {
+                        "region": "cn-hangzhou",
+                        "network": "public",
+                        "mcp": {"scopes": ["maxcompute:metadata:read"]},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        configs, default = load_configs(str(path))
+
+        assert configs[default].mcp_scopes == ("maxcompute:metadata:read",)
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            None,
+            {"scope": []},
+            {"scopes": None},
+            {"scopes": "maxcompute:metadata:read"},
+            {"scopes": [True]},
+            {"scopes": ["maxcompute:metadata:read"] * 2},
+            {"scopes": ["maxcompute:unknown:read"]},
+            {"scopes": ["maxcompute:knowledge:write"]},
+            {"scopes": ["maxcompute:tool:pick?name"]},
+            {"scopes": ["maxcompute:tool:"]},
+            {"scopes": ["maxcompute:tool:" + "a" * 128]},
+            {"scopes": [f"maxcompute:tool:{i}" for i in range(65)]},
+            {"scopes": [f"maxcompute:tool:{i:02d}{'x' * 100}" for i in range(40)]},
+        ],
+    )
+    def test_invalid_mcp_settings_are_rejected(
+        self, tmp_path: Path, settings: object
+    ) -> None:
+        path = tmp_path / "config.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "maxcompute": {
+                        "region": "cn-hangzhou",
+                        "network": "public",
+                        "mcp": settings,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises((TypeError, ValueError), match="mcp"):
+            load_configs(str(path))
+
     def test_named_simple_config_synthesizes_matching_endpoints(
         self,
         tmp_path: Path,
